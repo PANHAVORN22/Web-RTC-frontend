@@ -1,125 +1,122 @@
 "use client";
 
-import React, { useEffect } from "react";
-import Link from "next/link";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, Project } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Sparkles, LogOut, FolderKanban, Search, Command, ChevronDown } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Search,
+  Bell,
+  Plus,
+  FolderKanban,
+  Menu,
+} from "lucide-react";
+import { QuickCreateModal } from "@/components/quick-create-modal";
 
-export const Navbar: React.FC = () => {
+interface NavbarProps {
+  onToggleMobileMenu?: () => void;
+  onOpenCommandPalette?: () => void;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({
+  onToggleMobileMenu,
+  onOpenCommandPalette,
+}) => {
   const router = useRouter();
-  const { user, currentProject, projects, setCurrentProject, logout } = useAuth();
+  const { currentProject, projects, setCurrentProject } = useAuth();
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Cmd+K / Ctrl+K shortcut to focus search
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        router.push("/search");
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [router]);
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    } else if (onOpenCommandPalette) {
+      onOpenCommandPalette();
+    }
+  };
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#08090a]/90 backdrop-blur-md">
-      <div className="flex h-14 items-center justify-between px-4 sm:px-6">
-        {/* Brand & Project Switcher */}
-        <div className="flex items-center gap-5">
-          <Link href="/" className="flex items-center gap-2.5 font-bold text-sm tracking-tight text-white hover:opacity-90 transition-opacity">
-            <div className="w-6 h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center shadow-sm">
-              <Sparkles className="w-3.5 h-3.5" />
-            </div>
-            <span className="bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent">AI Workspace</span>
-          </Link>
+    <>
+      <header className="sticky top-0 z-20 w-full bg-[#F4F5F7] border-b border-codex-border/80 px-4 sm:px-8 py-3">
+        <div className="flex items-center justify-between gap-4 max-w-7xl mx-auto">
+          {/* Left: Mobile Menu Toggle & Search Bar */}
+          <div className="flex items-center gap-3 flex-1 max-w-md">
+            {onToggleMobileMenu && (
+              <button
+                type="button"
+                onClick={onToggleMobileMenu}
+                className="md:hidden p-2 rounded-lg text-slate-600 hover:text-codex-text hover:bg-slate-200/60"
+                aria-label="Toggle navigation menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
 
-          {user && (
-            <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-white/10">
-              <div className="flex items-center gap-2 bg-[#121318] border border-white/[0.08] hover:border-white/20 rounded-lg px-2.5 py-1 transition-all">
-                <FolderKanban className="w-3.5 h-3.5 text-indigo-400" />
+            <form onSubmit={handleSearchSubmit} className="relative w-full">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search requirements, tasks, documents..."
+                className="w-full h-10 pl-10 pr-4 rounded-xl border border-codex-border bg-white text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent focus:border-transparent placeholder:text-slate-400 transition-all"
+              />
+            </form>
+          </div>
+
+          {/* Right Actions: Project Switcher, Notification Bell & + New */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Active Project Switcher */}
+            {projects.length > 0 && (
+              <div className="hidden sm:flex items-center gap-2 bg-white border border-codex-border rounded-xl px-3 py-1.5 shadow-sm text-xs">
+                <FolderKanban className="w-3.5 h-3.5 text-codex-accent shrink-0" />
                 <select
                   value={currentProject?.id || ""}
                   onChange={(e) => {
                     const p = projects.find((proj: Project) => proj.id === e.target.value);
                     if (p) setCurrentProject(p);
                   }}
-                  className="text-xs font-medium bg-transparent text-zinc-200 focus:outline-none cursor-pointer pr-1"
+                  className="bg-transparent text-xs font-semibold text-codex-text focus:outline-none cursor-pointer pr-1"
                   aria-label="Select active project"
                 >
                   {projects.map((p: Project) => (
-                    <option key={p.id} value={p.id} className="bg-[#14151b] text-zinc-200">
+                    <option key={p.id} value={p.id}>
                       [{p.key}] {p.name}
                     </option>
                   ))}
                 </select>
-                {currentProject?.currentUserRole && (
-                  <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono text-zinc-400 border-white/10">
-                    {currentProject.currentUserRole}
-                  </Badge>
-                )}
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        {/* Quick Actions & Profile */}
-        <div className="flex items-center gap-2.5">
-          {user && (
-            <>
-              <Link href="/assistant">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-2 text-xs text-indigo-300 bg-indigo-950/30 border-indigo-500/30 hover:bg-indigo-900/40 hover:border-indigo-400/50 hover:text-indigo-200 transition-all shadow-sm"
-                  title="AI Workspace Assistant"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-                  <span className="hidden sm:inline">AI Copilot</span>
-                </Button>
-              </Link>
-              <Link href="/search">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-2 text-xs text-zinc-400 bg-white/[0.02] border-white/10 hover:border-indigo-500/40 hover:text-zinc-200 transition-all"
-                  title="Search Workspace (Ctrl+K)"
-                >
-                  <Search className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="hidden md:inline">Quick Search...</span>
-                  <kbd className="hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono bg-white/10 px-1.5 py-0.5 rounded text-zinc-400">
-                    <Command className="w-2.5 h-2.5" /> K
-                  </kbd>
-                </Button>
-              </Link>
-            </>
-          )}
+            {/* Notification Bell */}
+            <button
+              type="button"
+              className="relative p-2.5 rounded-xl border border-codex-border bg-white hover:bg-slate-50 text-slate-600 hover:text-codex-text shadow-sm transition-all"
+              aria-label="Notifications"
+            >
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-codex-warning ring-2 ring-white" />
+            </button>
 
-          {user ? (
-            <div className="flex items-center gap-2.5 pl-2 border-l border-white/10">
-              <div className="hidden sm:flex flex-col items-end text-xs leading-tight">
-                <span className="font-semibold text-zinc-200">{user.displayName || user.fullName || user.email}</span>
-                <span className="text-[10px] text-indigo-400 uppercase font-mono">{user.professionalRole || user.systemRole || user.role}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={logout}
-                className="h-8 w-8 p-0 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg"
-                title="Sign Out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          ) : (
-            <Link href="/login">
-              <Button size="sm" className="h-8 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500">Sign In</Button>
-            </Link>
-          )}
+            {/* + New Button */}
+            <Button
+              onClick={() => setQuickCreateOpen(true)}
+              className="bg-codex-accent hover:bg-codex-hover text-white rounded-xl px-4 py-2 text-xs font-semibold shadow-sm gap-1.5 h-10"
+            >
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <span>New</span>
+            </Button>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      {/* Quick Create Dialog */}
+      <QuickCreateModal
+        isOpen={quickCreateOpen}
+        onClose={() => setQuickCreateOpen(false)}
+      />
+    </>
   );
 };
