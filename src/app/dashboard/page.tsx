@@ -5,52 +5,110 @@ import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime } from "@/lib/utils";
 import {
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  FileCheck2,
-  ListTodo,
-  Activity,
-  User as UserIcon,
-  Plus,
-  GitPullRequest,
-  Calendar,
+  Folder,
+  CheckSquare,
   FileText,
-  Search,
-  ArrowRight,
+  Files,
+  FileCode,
+  Image as ImageIcon,
+  FileCheck2,
+  Calendar,
+  Bookmark,
   Sparkles,
-  HelpCircle,
-  FolderOpen,
-  Database,
+  ArrowRight,
+  Plus,
+  Clock,
+  User as UserIcon,
 } from "lucide-react";
 
+function formatTimeAgo(dateString?: string): string {
+  if (!dateString) return "Recently";
+  const now = new Date();
+  const date = new Date(dateString);
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (diffSec < 60) return "Just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay === 1) return "Yesterday";
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function formatActivity(action: string, entityType: string, metadata: any): { text: string; highlight?: string } {
+  switch (action) {
+    case "CREATE_TASK":
+      return { text: "created task", highlight: metadata?.title || metadata?.name || "Task" };
+    case "UPDATE_TASK_STATUS":
+      return { text: `updated task status to ${metadata?.newStatus || "updated"}`, highlight: metadata?.title };
+    case "CREATE_REQUIREMENT":
+      return { text: "defined requirement", highlight: metadata?.title || metadata?.displayKey || "Requirement" };
+    case "UPDATE_REQUIREMENT":
+      return { text: "updated requirement", highlight: metadata?.title || "Requirement" };
+    case "CREATE_DECISION":
+      return { text: "recorded decision", highlight: metadata?.title || "Architecture Decision" };
+    case "UPDATE_DECISION":
+      return { text: "updated decision", highlight: metadata?.title || "Decision" };
+    case "UPLOAD_DOCUMENT":
+    case "CREATE_DOCUMENT":
+      return { text: "uploaded document", highlight: metadata?.title || metadata?.originalFilename || "Document" };
+    case "CREATE_MEETING":
+      return { text: "scheduled meeting", highlight: metadata?.title || "Meeting" };
+    case "PROJECT_CREATED":
+      return { text: "created project workspace", highlight: metadata?.name || "" };
+    default:
+      return { text: action.replace(/_/g, " ").toLowerCase(), highlight: metadata?.title || metadata?.name };
+  }
+}
+
 export default function DashboardPage() {
-  const { currentProject, user } = useAuth();
+  const { currentProject, user, projects, setCurrentProject } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [activity, setActivity] = useState<any[]>([]);
-  const [sources, setSources] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showGuide, setShowGuide] = useState(true);
+  const [recentReqs, setRecentReqs] = useState<any[]>([]);
+  const [recentDocs, setRecentDocs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     async function loadDashboard() {
       if (!currentProject) return;
       setLoading(true);
       try {
-        const [dashData, actEnvelope, sourcesData] = await Promise.all([
-          api.dashboard.get(currentProject.id),
-          api.dashboard.getActivity(currentProject.id, 1, 15),
-          api.ingestion.listSources(currentProject.id).catch(() => []),
+        const [dashData, actEnvelope, reqsRes, docsRes] = await Promise.all([
+          api.dashboard.get(currentProject.id).catch(() => null),
+          api.dashboard.getActivity(currentProject.id, 1, 10).catch(() => null),
+          api.requirements.list(currentProject.id).catch(() => []),
+          api.documents.list(currentProject.id).catch(() => ({ data: [] })),
         ]);
-        setStats(dashData);
-        setActivity(actEnvelope?.data || dashData?.recentActivity || []);
-        setSources(sourcesData || []);
+
+        const rawDash = dashData?.data ?? dashData;
+        if (rawDash) setStats(rawDash);
+
+        if (actEnvelope?.data && actEnvelope.data.length > 0) {
+          setActivity(actEnvelope.data);
+        } else if (rawDash?.recentActivity && rawDash.recentActivity.length > 0) {
+          setActivity(rawDash.recentActivity);
+        } else {
+          setActivity([]);
+        }
+
+        const rawReqs: any[] = Array.isArray(reqsRes) ? reqsRes : ((reqsRes as any)?.data ?? []);
+        setRecentReqs(rawReqs.slice(0, 3));
+
+        const rawDocs: any[] = Array.isArray(docsRes) ? docsRes : ((docsRes as any)?.data ?? []);
+        setRecentDocs(rawDocs.slice(0, 3));
       } catch (err) {
         console.error("Dashboard load failed:", err);
       } finally {
@@ -60,542 +118,544 @@ export default function DashboardPage() {
     loadDashboard();
   }, [currentProject]);
 
-  if (!currentProject) {
-    return (
-      <AppLayout>
-        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600/15 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
-            <FolderOpen className="w-6 h-6" />
-          </div>
-          <h2 className="text-xl font-bold text-white">No Project Selected</h2>
-          <p className="text-xs text-zinc-400 max-w-sm">
-            Please select an existing project or create a new workspace to view its dashboard.
-          </p>
-          <Link href="/projects">
-            <Button size="sm" className="bg-indigo-600 hover:bg-indigo-500 text-xs">
-              Go to Projects
-            </Button>
-          </Link>
-        </div>
-      </AppLayout>
-    );
-  }
+  // Derived user name & date
+  const userName = user?.displayName
+    ? user.displayName.split(" ")[0]
+    : user?.fullName
+    ? user.fullName.split(" ")[0]
+    : "Member";
 
-  const reqCounts = stats?.requirementCountsByStatus || {};
-  const totalReqs =
-    (reqCounts.DRAFT ?? 0) +
-    (reqCounts.APPROVED ?? 0) +
-    (reqCounts.IN_PROGRESS ?? 0) +
-    (reqCounts.DONE ?? 0);
+  const todayFormatted = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(new Date());
 
-  const taskCounts = stats?.taskCountsByStatus || {};
-  const taskProgress = stats?.taskProgress;
-  const progressPct = taskProgress?.percentage ?? 0;
-  const overdueCount = stats?.overdueTasksCount ?? 0;
+  // Real Metrics from backend
+  const activeProjectsCount = projects.filter((p) => p.status !== "ARCHIVED").length;
+  const totalProjectsCount = projects.length;
+
+  const todoTasks = stats?.taskCountsByStatus?.TODO ?? 0;
+  const inProgressTasks = stats?.taskCountsByStatus?.IN_PROGRESS ?? 0;
+  const inReviewTasks = stats?.taskCountsByStatus?.IN_REVIEW ?? 0;
+  const doneTasks = stats?.taskCountsByStatus?.DONE ?? 0;
+  const cancelledTasks = stats?.taskCountsByStatus?.CANCELLED ?? 0;
+
+  const openTasksCount = todoTasks + inProgressTasks + inReviewTasks;
+  const overdueTasksCount = stats?.overdueTasksCount ?? 0;
+
+  const reqDraft = stats?.requirementCountsByStatus?.DRAFT ?? 0;
+  const reqApproved = stats?.requirementCountsByStatus?.APPROVED ?? 0;
+  const reqInProgress = stats?.requirementCountsByStatus?.IN_PROGRESS ?? 0;
+  const reqDone = stats?.requirementCountsByStatus?.DONE ?? 0;
+  const totalReqs = reqDraft + reqApproved + reqInProgress + reqDone;
+
+  const docsCount = recentDocs.length;
+
+  // Task breakdown percentages
+  const totalTasks = stats?.taskProgress?.total ?? (todoTasks + inProgressTasks + inReviewTasks + doneTasks);
+  const progressPct = stats?.taskProgress?.percentage ?? (totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0);
+
+  const todoPct = totalTasks > 0 ? Math.round((todoTasks / totalTasks) * 100) : 0;
+  const inProgPct = totalTasks > 0 ? Math.round(((inProgressTasks + inReviewTasks) / totalTasks) * 100) : 0;
+  const donePct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const blockedPct = Math.max(0, 100 - (todoPct + inProgPct + donePct));
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        
+      <div className="space-y-6 max-w-7xl mx-auto pb-10">
         {/* Welcome Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-[#12131a] to-[#0e0f14] border border-white/[0.08] p-6 rounded-2xl shadow-xl relative overflow-hidden">
-          <div className="space-y-1.5 z-10">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px] font-mono text-indigo-400 border-indigo-500/30 bg-indigo-600/10">
-                {currentProject.key}
-              </Badge>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-                {currentProject.name}
-              </h1>
-            </div>
-            <p className="text-xs text-zinc-400 max-w-2xl leading-relaxed">
-              {currentProject.description || "Unified project management for requirements, architectural decisions, tasks, meetings, and documents."}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 z-10">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowGuide(!showGuide)}
-              className="text-xs gap-1.5 h-8 border-white/10 bg-white/[0.03] text-zinc-300 hover:text-white"
-            >
-              <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{showGuide ? "Hide Guide" : "How It Works"}</span>
-            </Button>
-            <Link href="/search">
-              <Button size="sm" className="text-xs gap-1.5 h-8 bg-indigo-600 hover:bg-indigo-500 text-white shadow-md">
-                <Search className="w-3.5 h-3.5" />
-                <span>Search</span>
-              </Button>
-            </Link>
-          </div>
+        <div className="space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 font-serif">
+            Dashboard
+          </h1>
+          <p className="text-xs text-slate-500">
+            Welcome back, {userName} — here&apos;s the live overview for{" "}
+            <span className="font-semibold text-slate-800">{currentProject?.name || "your workspace"}</span>.{" "}
+            {todayFormatted}
+          </p>
         </div>
 
-        {/* Overdue Task Alert (Bangkok Timezone) */}
-        {overdueCount > 0 && (
-          <div className="flex items-center justify-between p-4 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-200 shadow-lg animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="font-semibold text-red-300">
-                  {overdueCount} Overdue Task{overdueCount > 1 ? "s" : ""}
-                </span>{" "}
-                in Bangkok timezone (Asia/Bangkok). Action is required to keep project on schedule.
-              </div>
-            </div>
-            <Link href="/tasks">
-              <Button size="sm" variant="outline" className="h-7 text-xs border-red-500/40 text-red-300 hover:bg-red-500/20 gap-1">
-                View Tasks <ArrowRight className="w-3 h-3" />
-              </Button>
-            </Link>
-          </div>
-        )}
-
-        {/* Interactive Quick Actions Hub */}
-        <div className="space-y-2">
-          <div className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Quick Actions
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Link href="/requirements" className="group">
-              <div className="p-3.5 rounded-xl bg-[#121318] border border-white/[0.08] hover:border-indigo-500/40 hover:bg-indigo-600/5 transition-all text-left flex flex-col justify-between h-24">
-                <div className="w-7 h-7 rounded-lg bg-indigo-600/15 text-indigo-400 flex items-center justify-center">
-                  <FileCheck2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-indigo-300 flex items-center justify-between">
-                    <span>Requirements</span>
-                    <Plus className="w-3 h-3 text-zinc-500 group-hover:text-indigo-400" />
-                  </div>
-                  <div className="text-[10px] text-zinc-500">Specifications</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/tasks" className="group">
-              <div className="p-3.5 rounded-xl bg-[#121318] border border-white/[0.08] hover:border-emerald-500/40 hover:bg-emerald-600/5 transition-all text-left flex flex-col justify-between h-24">
-                <div className="w-7 h-7 rounded-lg bg-emerald-600/15 text-emerald-400 flex items-center justify-center">
-                  <ListTodo className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-emerald-300 flex items-center justify-between">
-                    <span>Tasks</span>
-                    <Plus className="w-3 h-3 text-zinc-500 group-hover:text-emerald-400" />
-                  </div>
-                  <div className="text-[10px] text-zinc-500">Track & Assign</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/decisions" className="group">
-              <div className="p-3.5 rounded-xl bg-[#121318] border border-white/[0.08] hover:border-purple-500/40 hover:bg-purple-600/5 transition-all text-left flex flex-col justify-between h-24">
-                <div className="w-7 h-7 rounded-lg bg-purple-600/15 text-purple-400 flex items-center justify-center">
-                  <GitPullRequest className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-purple-300 flex items-center justify-between">
-                    <span>Decisions</span>
-                    <Plus className="w-3 h-3 text-zinc-500 group-hover:text-purple-400" />
-                  </div>
-                  <div className="text-[10px] text-zinc-500">Log ADRs</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/meetings" className="group">
-              <div className="p-3.5 rounded-xl bg-[#121318] border border-white/[0.08] hover:border-blue-500/40 hover:bg-blue-600/5 transition-all text-left flex flex-col justify-between h-24">
-                <div className="w-7 h-7 rounded-lg bg-blue-600/15 text-blue-400 flex items-center justify-center">
-                  <Calendar className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-blue-300 flex items-center justify-between">
-                    <span>Meetings</span>
-                    <Plus className="w-3 h-3 text-zinc-500 group-hover:text-blue-400" />
-                  </div>
-                  <div className="text-[10px] text-zinc-500">Minutes & Notes</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/documents" className="group">
-              <div className="p-3.5 rounded-xl bg-[#121318] border border-white/[0.08] hover:border-amber-500/40 hover:bg-amber-600/5 transition-all text-left flex flex-col justify-between h-24">
-                <div className="w-7 h-7 rounded-lg bg-amber-600/15 text-amber-400 flex items-center justify-center">
-                  <FileText className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-amber-300 flex items-center justify-between">
-                    <span>Documents</span>
-                    <Plus className="w-3 h-3 text-zinc-500 group-hover:text-amber-400" />
-                  </div>
-                  <div className="text-[10px] text-zinc-500">Upload Files</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/search" className="group">
-              <div className="p-3.5 rounded-xl bg-[#121318] border border-white/[0.08] hover:border-cyan-500/40 hover:bg-cyan-600/5 transition-all text-left flex flex-col justify-between h-24">
-                <div className="w-7 h-7 rounded-lg bg-cyan-600/15 text-cyan-400 flex items-center justify-center">
-                  <Search className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-zinc-200 group-hover:text-cyan-300 flex items-center justify-between">
-                    <span>Search</span>
-                    <ArrowRight className="w-3 h-3 text-zinc-500 group-hover:text-cyan-400" />
-                  </div>
-                  <div className="text-[10px] text-zinc-500">Instant Lookup</div>
-                </div>
-              </div>
-            </Link>
-          </div>
-        </div>
-
-        {/* Getting Started Guide */}
-        {showGuide && (
-          <div className="p-5 rounded-2xl bg-[#101116] border border-white/[0.08] space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold text-white flex items-center gap-2">
-                <HelpCircle className="w-4 h-4 text-indigo-400" />
-                <span>How This Workspace Works</span>
-              </div>
-              <span className="text-[11px] text-zinc-500 font-mono">4-Step Workflow</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] space-y-1">
-                <div className="font-semibold text-indigo-400 flex items-center gap-1.5">
-                  <span className="w-4 h-4 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px]">1</span>
-                  <span>Define Scope</span>
-                </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Add <strong className="text-zinc-200">Requirements</strong> with acceptance criteria. Each requirement gets a permanent key like <code className="text-indigo-300">AIW-REQ-1</code>.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] space-y-1">
-                <div className="font-semibold text-purple-400 flex items-center gap-1.5">
-                  <span className="w-4 h-4 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px]">2</span>
-                  <span>Record Decisions</span>
-                </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Log <strong className="text-zinc-200">ADRs</strong> to capture architecture decisions and rationale to avoid repetitive debates later.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] space-y-1">
-                <div className="font-semibold text-emerald-400 flex items-center gap-1.5">
-                  <span className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px]">3</span>
-                  <span>Execute Tasks</span>
-                </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Create <strong className="text-zinc-200">Tasks</strong> linked to requirements. Set due dates and track optimistic status transitions.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] space-y-1">
-                <div className="font-semibold text-amber-400 flex items-center gap-1.5">
-                  <span className="w-4 h-4 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px]">4</span>
-                  <span>Store Documents</span>
-                </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Upload <strong className="text-zinc-200">PDFs, DOCX, and Markdown</strong> files. Everything is indexed and searchable across the workspace.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Metrics Grid */}
+        {/* Top 4 Stat Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          
-          {/* Progress Card */}
-          <Card className="bg-[#121318] border-white/[0.08]">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-medium text-zinc-400">Task Completion</CardTitle>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {loading ? (
-                <Skeleton className="h-7 w-24 bg-white/5" />
-              ) : (
-                <>
-                  <div className="flex items-baseline justify-between">
-                    <div className="text-2xl font-bold text-white">{progressPct}%</div>
-                    <span className="text-xs text-zinc-400 font-mono">
-                      {taskProgress ? `${taskProgress.done}/${taskProgress.total - taskProgress.cancelled}` : "0/0"}
-                    </span>
-                  </div>
-                  <div className="w-full bg-white/[0.06] rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-emerald-500 to-teal-400 h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${progressPct}%` }}
-                    />
-                  </div>
-                  <p className="text-[10px] text-zinc-500">
-                    Formula: done / (total - cancelled)
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {/* Card 1: Active Projects */}
+          <Link
+            href="/projects"
+            className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-codex-accent/40 hover:shadow-sm transition-all block group"
+          >
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
+              <div className="flex items-center gap-2">
+                <Folder className="w-4 h-4 text-slate-400 group-hover:text-codex-accent transition-colors" />
+                <span>Active Projects</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-codex-accent" />
+            </div>
+            <div className="mt-2 text-3xl font-bold text-slate-900 font-serif">
+              {activeProjectsCount}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              {totalProjectsCount} total workspace{totalProjectsCount === 1 ? "" : "s"}
+            </div>
+          </Link>
 
-          {/* Overdue Tasks */}
-          <Card className="bg-[#121318] border-white/[0.08]">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-medium text-zinc-400">Overdue Tasks</CardTitle>
-              <Clock className="w-4 h-4 text-amber-400" />
-            </CardHeader>
-            <CardContent className="space-y-1">
-              {loading ? (
-                <Skeleton className="h-7 w-16 bg-white/5" />
+          {/* Card 2: Open Tasks */}
+          <Link
+            href="/tasks"
+            className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-codex-accent/40 hover:shadow-sm transition-all block group"
+          >
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-4 h-4 text-slate-400 group-hover:text-codex-accent transition-colors" />
+                <span>Open Tasks</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-codex-accent" />
+            </div>
+            <div className="mt-2 text-3xl font-bold text-slate-900 font-serif">
+              {openTasksCount}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              {overdueTasksCount > 0 ? (
+                <span className="text-amber-600 font-medium">{overdueTasksCount} overdue</span>
               ) : (
-                <>
-                  <div className="text-2xl font-bold text-white">{overdueCount}</div>
-                  <p className="text-[10px] text-zinc-500">
-                    Calculated in Bangkok timezone (ICT)
-                  </p>
-                </>
+                `${doneTasks} completed`
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Link>
 
-          {/* My Tasks */}
-          <Card className="bg-[#121318] border-white/[0.08]">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-medium text-zinc-400">My Assigned Tasks</CardTitle>
-              <UserIcon className="w-4 h-4 text-blue-400" />
-            </CardHeader>
-            <CardContent className="space-y-1">
-              {loading ? (
-                <Skeleton className="h-7 w-16 bg-white/5" />
-              ) : (
-                <>
-                  <div className="text-2xl font-bold text-white">
-                    {stats?.myAssignedTasksCount ?? 0}
-                  </div>
-                  <p className="text-[10px] text-zinc-500">
-                    Assigned to {user?.displayName || "you"}
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {/* Card 3: Requirements */}
+          <Link
+            href="/requirements"
+            className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-codex-accent/40 hover:shadow-sm transition-all block group"
+          >
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-slate-400 group-hover:text-codex-accent transition-colors" />
+                <span>Requirements</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-codex-accent" />
+            </div>
+            <div className="mt-2 text-3xl font-bold text-slate-900 font-serif">
+              {totalReqs}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              {reqApproved} approved · {reqDraft} draft
+            </div>
+          </Link>
 
-          {/* Requirements Total */}
-          <Card className="bg-[#121318] border-white/[0.08]">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-medium text-zinc-400">Total Requirements</CardTitle>
-              <FileCheck2 className="w-4 h-4 text-indigo-400" />
-            </CardHeader>
-            <CardContent className="space-y-1">
-              {loading ? (
-                <Skeleton className="h-7 w-16 bg-white/5" />
-              ) : (
-                <>
-                  <div className="text-2xl font-bold text-white">{totalReqs}</div>
-                  <p className="text-[10px] text-zinc-500">
-                    {reqCounts.APPROVED ?? 0} approved, {reqCounts.IN_PROGRESS ?? 0} in progress
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
+          {/* Card 4: Documents */}
+          <Link
+            href="/documents"
+            className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-codex-accent/40 hover:shadow-sm transition-all block group"
+          >
+            <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
+              <div className="flex items-center gap-2">
+                <Files className="w-4 h-4 text-slate-400 group-hover:text-codex-accent transition-colors" />
+                <span>Documents</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-codex-accent" />
+            </div>
+            <div className="mt-2 text-3xl font-bold text-slate-900 font-serif">
+              {docsCount}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Project knowledge assets
+            </div>
+          </Link>
         </div>
 
-        {/* Detailed Breakdowns */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          {/* Requirements Status */}
-          <Card className="bg-[#121318] border-white/[0.08]">
-            <CardHeader className="pb-3 border-b border-white/[0.06]">
-              <CardTitle className="text-xs font-semibold text-zinc-200 flex items-center justify-between">
-                <span>Requirements by Status</span>
-                <Link href="/requirements" className="text-[11px] text-indigo-400 hover:underline font-normal">
-                  View all →
-                </Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-2.5">
-              {loading ? (
-                <Skeleton className="h-20 w-full bg-white/5" />
-              ) : (
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">Draft</span>
-                    <Badge variant="outline" className="text-xs font-mono">{reqCounts.DRAFT ?? 0}</Badge>
+        {/* 2-Column Split: Main Left (~70%) and Right Activity Sidebar (~30%) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Main Left Column */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* 1. Featured Project Hero Banner (Dark Navy Card) */}
+            <div className="bg-[#161927] rounded-2xl p-6 text-white shadow-md border border-slate-800 relative overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="space-y-3 max-w-xl">
+                  {/* Badge */}
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-blue-500/10 text-codex-hover border border-blue-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-codex-accent animate-pulse" />
+                    Key: {currentProject?.key || "AIW"} · Role: {currentProject?.currentUserRole || "Member"}
                   </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">Approved</span>
-                    <Badge variant="success" className="text-xs font-mono">{reqCounts.APPROVED ?? 0}</Badge>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">In Progress</span>
-                    <Badge className="bg-blue-600/20 text-blue-400 border-blue-500/30 text-xs font-mono">{reqCounts.IN_PROGRESS ?? 0}</Badge>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">Done</span>
-                    <Badge className="bg-emerald-600/20 text-emerald-400 border-emerald-500/30 text-xs font-mono">{reqCounts.DONE ?? 0}</Badge>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Tasks Status */}
-          <Card className="bg-[#121318] border-white/[0.08]">
-            <CardHeader className="pb-3 border-b border-white/[0.06]">
-              <CardTitle className="text-xs font-semibold text-zinc-200 flex items-center justify-between">
-                <span>Tasks by Status</span>
-                <Link href="/tasks" className="text-[11px] text-emerald-400 hover:underline font-normal">
-                  View all →
-                </Link>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-2.5">
-              {loading ? (
-                <Skeleton className="h-20 w-full bg-white/5" />
-              ) : (
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">To Do</span>
-                    <Badge variant="outline" className="text-xs font-mono">{taskCounts.TODO ?? 0}</Badge>
+                  {/* Title & Description */}
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                      {currentProject?.name || "Active Workspace"}
+                    </h2>
+                    <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                      {currentProject?.description ||
+                        "Centralize requirements, decisions, tasks, meetings, and documents into one permission-aware workspace."}
+                    </p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">In Progress</span>
-                    <Badge className="bg-blue-600/20 text-blue-400 border-blue-500/30 text-xs font-mono">{taskCounts.IN_PROGRESS ?? 0}</Badge>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">In Review</span>
-                    <Badge className="bg-amber-600/20 text-amber-400 border-amber-500/30 text-xs font-mono">{taskCounts.IN_REVIEW ?? 0}</Badge>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04] flex items-center justify-between">
-                    <span className="text-zinc-400">Done</span>
-                    <Badge variant="success" className="text-xs font-mono">{taskCounts.DONE ?? 0}</Badge>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
-        </div>
-
-        {/* Semantic Knowledge Base & Vector Index (Phase 2) */}
-        <Card className="bg-[#121318] border-white/[0.08]">
-          <CardHeader className="pb-3 border-b border-white/[0.06] flex flex-row items-center justify-between">
-            <CardTitle className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
-              <Database className="w-4 h-4 text-emerald-400" />
-              <span>Semantic Knowledge Base & Vector Pipeline</span>
-            </CardTitle>
-            <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] font-normal">
-              1536-dim pgvector
-            </Badge>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {loading ? (
-              <Skeleton className="h-16 w-full bg-white/5" />
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono">Indexed Sources</div>
-                    <div className="text-xl font-bold text-white mt-1">
-                      {sources.filter((s) => s.status === "INDEXED").length}
+                  {/* Stats Row */}
+                  <div className="flex flex-wrap items-center gap-4 sm:gap-6 pt-2 text-xs text-slate-300">
+                    <div>
+                      <span className="font-bold text-white">{doneTasks} / {totalTasks}</span> Tasks done
                     </div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">
-                      of {sources.length} registered
+                    <div>
+                      <span className="font-bold text-white">{totalReqs}</span> Requirements
                     </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono">Total Chunks</div>
-                    <div className="text-xl font-bold text-emerald-400 mt-1">
-                      {sources.reduce((acc, s) => acc + (s.chunkCount || 0), 0)}
+                    <div>
+                      <span className="font-bold text-white">{docsCount}</span> Documents
                     </div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">
-                      ~600 tokens/chunk
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono">Documents</div>
-                    <div className="text-xl font-bold text-amber-400 mt-1">
-                      {sources.filter((s) => s.sourceType === "DOCUMENT").length}
-                    </div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">
-                      PDF, DOCX, MD, TXT
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-mono">Workspace Entities</div>
-                    <div className="text-xl font-bold text-indigo-400 mt-1">
-                      {sources.filter((s) => s.sourceType !== "DOCUMENT").length}
-                    </div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">
-                      Reqs, Decisions, Tasks
+                    <div>
+                      <span className="font-bold text-white capitalize">{currentProject?.status?.toLowerCase() || "Active"}</span> Status
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-1">
-                  <span className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                    Automated background outbox synchronization enabled
+                {/* Circular Progress Indicator */}
+                <div className="flex flex-col items-center justify-center shrink-0 space-y-2.5">
+                  <div className="relative w-24 h-24 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                      <path
+                        className="text-slate-800"
+                        strokeWidth="3.5"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <path
+                        className="text-codex-accent transition-all duration-500"
+                        strokeDasharray={`${progressPct}, 100`}
+                        strokeLinecap="round"
+                        strokeWidth="3.5"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                      <span className="text-base font-bold text-white leading-none">{progressPct}%</span>
+                      <span className="text-[9px] text-slate-400 uppercase tracking-wider mt-0.5">
+                        complete
+                      </span>
+                    </div>
+                  </div>
+
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-semibold text-codex-hover bg-blue-500/10 border border-blue-500/30">
+                    {stats?.taskProgress?.label || `${progressPct}% done`}
                   </span>
-                  <Link href="/documents" className="text-indigo-400 hover:underline">
-                    Manage Documents →
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Active Projects List */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">Your Projects</h3>
+                <Link
+                  href="/projects"
+                  className="text-xs font-semibold text-codex-accent hover:underline flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+
+              {projects.length === 0 ? (
+                <div className="text-center py-6 text-slate-500 text-xs">
+                  No projects available. Create your first project to get started.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {projects.map((proj) => {
+                    const isSelected = currentProject?.id === proj.id;
+                    return (
+                      <div
+                        key={proj.id}
+                        onClick={() => setCurrentProject(proj)}
+                        className={`p-4 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                          isSelected
+                            ? "border-codex-accent/60 bg-blue-50/20 shadow-xs"
+                            : "border-slate-200/90 hover:border-codex-accent/40 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                              {proj.key}
+                            </span>
+                            <span className="text-xs font-bold text-slate-900">
+                              {proj.name}
+                            </span>
+                            {isSelected && (
+                              <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-700">
+                                Active Workspace
+                              </Badge>
+                            )}
+                          </div>
+                          <Badge variant={proj.status === "ACTIVE" ? "ontrack" : "secondary"}>
+                            {proj.status === "ACTIVE" ? "Active" : proj.status}
+                          </Badge>
+                        </div>
+
+                        <p className="text-[11px] text-slate-500 line-clamp-1">
+                          {proj.description || "Workspace for requirements, tasks, decisions, and documents."}
+                        </p>
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                          <span>Role: {proj.currentUserRole || "Member"}</span>
+                          <span>Created {formatTimeAgo(proj.createdAt)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 3. Task Statistics Section */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">Task Statistics</h3>
+                <Link
+                  href="/tasks"
+                  className="text-xs font-semibold text-codex-accent hover:underline flex items-center gap-1"
+                >
+                  <span>All tasks</span>
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+
+              {/* Segmented Horizontal Bar */}
+              <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex">
+                <div
+                  className="h-full bg-slate-400 transition-all duration-300"
+                  style={{ width: `${todoPct}%` }}
+                  title={`To Do: ${todoTasks}`}
+                />
+                <div
+                  className="h-full bg-codex-accent transition-all duration-300"
+                  style={{ width: `${inProgPct}%` }}
+                  title={`In Progress / Review: ${inProgressTasks + inReviewTasks}`}
+                />
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-300"
+                  style={{ width: `${donePct}%` }}
+                  title={`Done: ${doneTasks}`}
+                />
+                <div
+                  className="h-full bg-amber-500 transition-all duration-300"
+                  style={{ width: `${blockedPct}%` }}
+                  title={`Cancelled / Other: ${cancelledTasks}`}
+                />
+              </div>
+
+              {/* Legend */}
+              <div className="flex flex-wrap items-center gap-6 pt-1 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-slate-400 shrink-0" />
+                  <span className="text-slate-600">To Do</span>
+                  <span className="font-bold text-slate-900">{todoTasks}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-codex-accent shrink-0" />
+                  <span className="text-slate-600">In Progress</span>
+                  <span className="font-bold text-slate-900">{inProgressTasks + inReviewTasks}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-emerald-500 shrink-0" />
+                  <span className="text-slate-600">Done</span>
+                  <span className="font-bold text-slate-900">{doneTasks}</span>
+                </div>
+                {cancelledTasks > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded bg-amber-500 shrink-0" />
+                    <span className="text-slate-600">Cancelled</span>
+                    <span className="font-bold text-slate-900">{cancelledTasks}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 4. Recent Requirements Section */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">Recent Requirements</h3>
+                <Link
+                  href="/requirements"
+                  className="text-xs font-semibold text-codex-accent hover:underline flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+
+              {recentReqs.length === 0 ? (
+                <div className="text-center py-6 text-slate-500 text-xs">
+                  No requirements created yet in this workspace.{" "}
+                  <Link href="/requirements" className="text-codex-accent hover:underline font-medium">
+                    Define a requirement
                   </Link>
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {recentReqs.map((req) => (
+                    <Link
+                      key={req.id}
+                      href={`/requirements?search=${encodeURIComponent(req.displayKey || req.title)}`}
+                      className="py-3 flex items-center justify-between gap-4 first:pt-0 last:pb-0 group block"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-blue-50 text-codex-accent flex items-center justify-center shrink-0 border border-blue-100">
+                          <FileCheck2 className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="text-xs font-semibold text-slate-900 truncate group-hover:text-codex-accent transition-colors">
+                            {req.title}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                            {req.displayKey && (
+                              <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-mono text-[10px]">
+                                {req.displayKey}
+                              </span>
+                            )}
+                            <span>Priority: {req.priority || "MEDIUM"}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <Badge variant={req.status === "APPROVED" ? "ontrack" : req.status === "IN_PROGRESS" ? "atrisk" : "secondary"}>
+                          {req.status}
+                        </Badge>
+                        <span className="text-[10px] text-slate-400">{formatTimeAgo(req.updatedAt || req.createdAt)}</span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
 
-        {/* Live Recent Activity */}
-        <Card className="bg-[#121318] border-white/[0.08]">
-          <CardHeader className="pb-3 border-b border-white/[0.06]">
-            <CardTitle className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-indigo-400" />
-              <span>Recent Activity Feed</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {loading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-10 w-full bg-white/5" />
-                <Skeleton className="h-10 w-full bg-white/5" />
-                <Skeleton className="h-10 w-full bg-white/5" />
+            {/* 5. Recent Documents Section */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">Recent Documents</h3>
+                <Link
+                  href="/documents"
+                  className="text-xs font-semibold text-codex-accent hover:underline flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
               </div>
-            ) : activity.length === 0 ? (
-              <div className="text-center py-8 text-xs text-zinc-500">
-                No recent activity recorded for this workspace yet.
-              </div>
-            ) : (
-              <div className="divide-y divide-white/[0.04]">
-                {activity.map((item, idx) => (
-                  <div key={item.id || idx} className="py-2.5 flex items-center justify-between text-xs gap-4">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Badge variant="outline" className="text-[10px] uppercase font-mono border-white/10 shrink-0">
-                        {item.entityType || "ITEM"}
-                      </Badge>
-                      <span className="text-zinc-300 font-medium truncate">
-                        {item.action || "Updated"}
-                      </span>
-                      {item.actor && (
-                        <span className="text-zinc-500 text-[11px] truncate hidden sm:inline">
-                          by {item.actor.displayName || item.actor.email}
+
+              {recentDocs.length === 0 ? (
+                <div className="text-center py-6 text-slate-500 text-xs">
+                  No documents uploaded yet.{" "}
+                  <Link href="/documents" className="text-codex-accent hover:underline font-medium">
+                    Upload a project document
+                  </Link>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {recentDocs.map((doc) => {
+                    const isPdf = doc.mimeType?.includes("pdf") || doc.originalFilename?.endsWith(".pdf");
+                    const isImg = doc.mimeType?.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(doc.originalFilename);
+
+                    return (
+                      <Link
+                        key={doc.id}
+                        href={`/documents?search=${encodeURIComponent(doc.title || doc.originalFilename)}`}
+                        className="py-3 flex items-center justify-between gap-4 first:pt-0 last:pb-0 group block"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                              isPdf
+                                ? "bg-red-50 text-red-600 border-red-100"
+                                : isImg
+                                ? "bg-blue-50 text-codex-accent border-blue-100"
+                                : "bg-amber-50 text-amber-600 border-amber-100"
+                            }`}
+                          >
+                            {isPdf ? (
+                              <FileText className="w-4 h-4" />
+                            ) : isImg ? (
+                              <ImageIcon className="w-4 h-4" />
+                            ) : (
+                              <FileCode className="w-4 h-4" />
+                            )}
+                          </div>
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="text-xs font-semibold text-slate-900 truncate group-hover:text-codex-accent transition-colors">
+                              {doc.title || doc.originalFilename}
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                              <span className="font-mono text-[10px] text-slate-400">
+                                {formatBytes(doc.sizeBytes)} · Rev {doc.revision ?? 1}
+                              </span>
+                              <span>Status: {doc.processingStatus || "READY"}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-slate-400 shrink-0">
+                          {formatTimeAgo(doc.createdAt)}
                         </span>
-                      )}
-                    </div>
-                    <span className="text-[11px] text-zinc-500 shrink-0 font-mono">
-                      {formatDateTime(item.createdAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
 
+          {/* Right Column: Recent Activity Feed (~30%) */}
+          <div className="lg:col-span-4">
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs sticky top-20">
+              <h3 className="text-base font-bold font-serif text-slate-900 mb-5">Recent Activity</h3>
+
+              {activity.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-xs">
+                  No activity recorded yet for this project.
+                </div>
+              ) : (
+                <div className="relative">
+                  {activity.map((item, idx) => {
+                    const actorName = item.actor?.displayName || item.actor?.email?.split("@")[0] || "Team Member";
+                    const actorInitials = actorName
+                      .split(" ")
+                      .map((n: string) => n[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase() || "TM";
+                    const isLast = idx === activity.length - 1;
+                    const parsed = formatActivity(item.action, item.entityType, item.metadata);
+
+                    return (
+                      <div key={item.id || idx} className={`relative flex items-start gap-3.5 ${isLast ? "" : "pb-5"}`}>
+                        {!isLast && (
+                          <span
+                            className="absolute left-4 top-4 -bottom-1 w-[1.5px] -translate-x-1/2 bg-slate-200"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <div className="relative z-10 w-8 h-8 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center shrink-0 shadow-2xs">
+                          {actorInitials}
+                        </div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <p className="text-xs text-slate-700 leading-relaxed">
+                            <span className="font-bold text-slate-900">{actorName}</span>{" "}
+                            {parsed.text}{" "}
+                            {parsed.highlight && (
+                              <span className="font-medium text-codex-accent">
+                                &ldquo;{parsed.highlight}&rdquo;
+                              </span>
+                            )}
+                          </p>
+                          <span className="text-[11px] text-slate-400 mt-1 block">
+                            {formatTimeAgo(item.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </AppLayout>
   );
