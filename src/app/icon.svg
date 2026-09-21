@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="ai-tab-cyan" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="50%" stop-color="#4FACFE" />
+      <stop offset="100%" stop-color="#0052D4" />
+    </linearGradient>
+  </defs>
+  <!-- Dark squircle tile -->
+  <rect width="32" height="32" rx="7" fill="#161927" />
+  
+  <!-- Architectural white A chevron -->
+  <path
+    d="M10.5 7 H14.5 L21 25 H16.5 L12.5 14.5 L8.5 25 H4 L10.5 7 Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- Vertical rounded I-pillar in Electric Cyber Cyan -->
+  <rect
+    x="22.5"
+    y="7"
+    width="4.5"
+    height="18"
+    rx="2.25"
+    fill="url(#ai-tab-cyan)"
+  />
+</svg>

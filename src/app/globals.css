@@ -5,26 +5,26 @@
 
 @layer base {
   :root {
-    --background: 224 71% 4%;
-    --foreground: 210 40% 98%;
-    --card: 224 71% 6%;
-    --card-foreground: 210 40% 98%;
-    --popover: 224 71% 6%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 239 84% 67%;
+    --background: 220 14% 96%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 231 82% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 224 45% 12%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 224 45% 12%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 224 45% 15%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 224 35% 15%;
-    --input: 224 35% 15%;
-    --ring: 239 84% 67%;
-    --radius: 0.5rem;
+    --secondary: 220 13% 91%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 13% 91%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 231 82% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 12 76% 47%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 231 82% 60%;
+    --radius: 0.75rem;
   }
 
   * {
@@ -33,42 +33,94 @@
 
   body {
     background-color: #08090a;
-    color: #f7f8f8;
+    color: #F8FAFC;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
   }
 }
 
-/* Custom subtle scrollbar */
+/* Root Scrollbar - Dark theme for landing page and window */
+html {
+  color-scheme: dark;
+  background-color: #08090a;
+  scrollbar-color: #272a38 #08090a;
+  scrollbar-width: thin;
+}
+
+/* Window / root webkit scrollbar - dark to seamlessly match landing page */
 ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #08090a !important;
+}
+::-webkit-scrollbar-thumb {
+  background: #272a38 !important;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #383c50 !important;
+}
+::-webkit-scrollbar-corner {
+  background: #08090a !important;
+}
+
+/* AppLayout Shell - light scrollbar for dashboard, assistant, and all workspace pages */
+.app-layout-shell,
+.app-layout-shell * {
+  scrollbar-color: #CBD5E1 transparent;
+  scrollbar-width: thin;
+}
+.app-layout-shell ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+.app-layout-shell ::-webkit-scrollbar-track {
+  background: transparent !important;
 }
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+.app-layout-shell ::-webkit-scrollbar-thumb {
+  background: #CBD5E1 !important;
   border-radius: 9999px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+.app-layout-shell ::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8 !important;
+}
+.app-layout-shell ::-webkit-scrollbar-corner {
+  background: transparent !important;
 }
 
-@keyframes meteor {
+/* Dark Sidebar inside AppLayout - subtle semi-transparent thumb */
+.app-layout-shell nav::-webkit-scrollbar-thumb,
+.app-layout-shell aside::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15) !important;
+}
+.app-layout-shell nav::-webkit-scrollbar-thumb:hover,
+.app-layout-shell aside::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Continuous Non-Stop Meteor Shower */
+@keyframes meteor-shower {
   0% {
     transform: rotate(215deg) translateX(0);
+    opacity: 0;
+  }
+  6% {
     opacity: 1;
   }
-  70% {
+  80% {
     opacity: 1;
   }
   100% {
-    transform: rotate(215deg) translateX(-500px);
+    transform: rotate(215deg) translateX(-850px);
     opacity: 0;
   }
 }
 
-.animate-meteor {
-  animation: meteor 5s linear infinite;
+.animate-meteor-continuous {
+  animation-name: meteor-shower;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform, opacity;
 }

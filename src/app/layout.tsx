@@ -7,8 +7,16 @@ import { ToastProvider } from "@/context/toast-context";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "AI Project Workspace",
+  title: "AI Workspace - Project Workspace Intelligence",
   description: "Unified Intelligence for Modern Project Teams",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "32x32" },
+    ],
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -17,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" style={{ colorScheme: "dark" }}>
       <body className={`${inter.className} bg-[#08090a] text-zinc-100 min-h-screen`}>
         <AuthProvider>
           <ToastProvider>
