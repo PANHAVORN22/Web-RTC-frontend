@@ -18,10 +18,23 @@ import {
   ExternalLink,
   X,
   Sparkles,
-  Command
+  Database,
+  Cpu,
 } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+
+function GithubIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+      />
+    </svg>
+  );
+}
 
 const TYPE_ICONS: Record<string, any> = {
   REQUIREMENT: FileCheck2,
@@ -29,6 +42,7 @@ const TYPE_ICONS: Record<string, any> = {
   TASK: CheckSquare,
   MEETING: Calendar,
   DOCUMENT: FileText,
+  GITHUB_ISSUE: GithubIcon,
 };
 
 const TYPE_LINKS: Record<string, string> = {
@@ -37,14 +51,16 @@ const TYPE_LINKS: Record<string, string> = {
   TASK: "/tasks",
   MEETING: "/meetings",
   DOCUMENT: "/documents",
+  GITHUB_ISSUE: "/integrations",
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  REQUIREMENT: "bg-indigo-600/15 text-indigo-400 border-indigo-500/20",
-  DECISION: "bg-purple-600/15 text-purple-400 border-purple-500/20",
-  TASK: "bg-emerald-600/15 text-emerald-400 border-emerald-500/20",
-  MEETING: "bg-blue-600/15 text-blue-400 border-blue-500/20",
-  DOCUMENT: "bg-amber-600/15 text-amber-400 border-amber-500/20",
+  REQUIREMENT: "bg-blue-50 text-blue-700 border border-blue-200",
+  DECISION: "bg-purple-50 text-purple-700 border border-purple-200",
+  TASK: "bg-[#E8F5E9] text-[#2D8A60] border border-green-200",
+  MEETING: "bg-cyan-50 text-cyan-700 border border-cyan-200",
+  DOCUMENT: "bg-amber-50 text-amber-700 border border-amber-200",
+  GITHUB_ISSUE: "bg-slate-900 text-white border border-slate-700",
 };
 
 const SUGGESTIONS = [
@@ -54,7 +70,7 @@ const SUGGESTIONS = [
   "PostgreSQL",
   "AIW-REQ-1",
   "Cookie",
-  "Meeting"
+  "Meeting",
 ];
 
 export default function SearchPage() {
@@ -63,10 +79,15 @@ export default function SearchPage() {
   const [results, setResults] = useState<any[]>([]);
   const [meta, setMeta] = useState<any>(null);
   const [selectedType, setSelectedType] = useState<string>("");
+  const [searchMode, setSearchMode] = useState<"hybrid" | "semantic" | "keyword">("hybrid");
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  const executeSearch = async (searchTerm: string, typeFilter?: string) => {
+  const executeSearch = async (
+    searchTerm: string,
+    typeFilter?: string,
+    mode: "hybrid" | "semantic" | "keyword" = searchMode
+  ) => {
     if (!currentProject || !searchTerm.trim()) return;
     setLoading(true);
     setHasSearched(true);
@@ -74,7 +95,10 @@ export default function SearchPage() {
       const envelope = await api.search.query(
         currentProject.id,
         searchTerm.trim(),
-        typeFilter || undefined
+        typeFilter || undefined,
+        1,
+        25,
+        mode
       );
       setResults(envelope.data || []);
       setMeta(envelope.meta || null);
@@ -87,18 +111,25 @@ export default function SearchPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    executeSearch(query, selectedType);
+    executeSearch(query, selectedType, searchMode);
   };
 
   const handleSuggestionClick = (term: string) => {
     setQuery(term);
-    executeSearch(term, selectedType);
+    executeSearch(term, selectedType, searchMode);
   };
 
   const handleTypeChange = (type: string) => {
     setSelectedType(type);
     if (query.trim()) {
-      executeSearch(query, type);
+      executeSearch(query, type, searchMode);
+    }
+  };
+
+  const handleModeChange = (mode: "hybrid" | "semantic" | "keyword") => {
+    setSearchMode(mode);
+    if (query.trim()) {
+      executeSearch(query, selectedType, mode);
     }
   };
 
@@ -115,67 +146,124 @@ export default function SearchPage() {
     (counts.DECISION || 0) +
     (counts.TASK || 0) +
     (counts.MEETING || 0) +
-    (counts.DOCUMENT || 0);
+    (counts.DOCUMENT || 0) +
+    (counts.GITHUB_ISSUE || 0);
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-4xl">
-        
+      <div className="space-y-6 max-w-5xl mx-auto pb-12">
         {/* Header */}
-        <div className="border-b border-white/[0.08] pb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-cyan-600/15 text-cyan-400 flex items-center justify-center">
+        <div className="border-b border-codex-border pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center border border-blue-100">
               <SearchIcon className="w-4 h-4" />
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-              Workspace Universal Search
+            <h1 className="text-2xl font-bold tracking-tight text-codex-text font-serif">
+              Universal Search
             </h1>
           </div>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-codex-muted mt-1">
             Instant multi-entity search across requirements, decisions, tasks, meetings, and documents with faceted counts.
           </p>
         </div>
 
-        {/* Search Input Bar */}
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <div className="relative flex-1">
-            <SearchIcon className="w-4 h-4 absolute left-3.5 top-3 text-zinc-500" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search keyword or local key (e.g. AIW-REQ-1, postgres, session, auth)..."
-              className="pl-10 pr-10 text-xs h-10 bg-[#121318] border-white/10 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={handleClear}
-                className="absolute right-3 top-3 text-zinc-500 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
+        {/* Search Mode Selector & Input Bar */}
+        <div className="space-y-2.5">
+          {/* Search Mode Selector */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Search Engine:</span>
+              <div className="inline-flex items-center p-1 bg-white border border-slate-200 rounded-xl shadow-xs gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleModeChange("hybrid")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                    searchMode === "hybrid"
+                      ? "bg-[#161927] text-white shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="Reciprocal Rank Fusion: combines semantic vectors and keyword FTS for maximum recall"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Hybrid (RRF Fusion)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange("semantic")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                    searchMode === "semantic"
+                      ? "bg-[#161927] text-white shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="Cosine similarity over OpenAI 1536-dimensional pgvector embeddings"
+                >
+                  <Cpu className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Semantic (pgvector)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange("keyword")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                    searchMode === "keyword"
+                      ? "bg-[#161927] text-white shadow-xs font-semibold"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  title="Exact PostgreSQL full-text search"
+                >
+                  <SearchIcon className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Keyword (FTS)</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-slate-400 font-mono hidden sm:block">
+              {searchMode === "hybrid" && "RRF Rank Fusion • Cosine + ts_rank"}
+              {searchMode === "semantic" && "pgvector text-embedding-3-small"}
+              {searchMode === "keyword" && "PostgreSQL Full-Text Search"}
+            </div>
           </div>
-          <Button
-            type="submit"
-            disabled={loading || !query.trim()}
-            className="h-10 px-5 text-xs bg-indigo-600 hover:bg-indigo-500 font-semibold"
-          >
-            {loading ? "Searching..." : "Search"}
-          </Button>
-        </form>
+
+          {/* Search Input Bar */}
+          <form onSubmit={handleSearch} className="flex gap-2.5">
+            <div className="relative flex-1">
+              <SearchIcon className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search keyword or local key (e.g. AIW-REQ-1, postgres, session, auth)..."
+                className="w-full pl-10 pr-10 text-xs h-10 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent focus:border-codex-accent shadow-xs"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <Button
+              type="submit"
+              disabled={loading || !query.trim()}
+              className="h-10 px-5 text-xs bg-codex-accent hover:bg-codex-hover text-white font-medium rounded-xl shadow-xs"
+            >
+              {loading ? "Searching..." : "Search"}
+            </Button>
+          </form>
+        </div>
 
         {/* Suggested Searches */}
-        <div className="flex items-center gap-1.5 flex-wrap text-xs text-zinc-400">
-          <span className="text-[11px] text-zinc-500 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-indigo-400" /> Suggestions:
+        <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500">
+          <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">
+            <Sparkles className="w-3 h-3 text-codex-accent" /> Suggestions:
           </span>
           {SUGGESTIONS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => handleSuggestionClick(s)}
-              className="px-2 py-0.5 rounded-md bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] text-[11px] text-zinc-300 transition-all font-mono"
+              className="px-2.5 py-0.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-[11px] text-slate-600 hover:text-slate-900 transition-all font-mono shadow-2xs cursor-pointer"
             >
               {s}
             </button>
@@ -184,11 +272,13 @@ export default function SearchPage() {
 
         {/* Faceted Tabs */}
         {hasSearched && (
-          <div className="flex flex-wrap items-center gap-2 pt-1 border-b border-white/[0.06] pb-3 text-xs">
+          <div className="inline-flex items-center p-1 bg-white border border-slate-200 rounded-xl shadow-xs gap-1 flex-wrap">
             <button
               onClick={() => handleTypeChange("")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                selectedType === "" ? "bg-white/10 text-white font-semibold" : "text-zinc-400 hover:text-zinc-200"
+                selectedType === ""
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               All Results ({totalCount || results.length})
@@ -196,7 +286,9 @@ export default function SearchPage() {
             <button
               onClick={() => handleTypeChange("REQUIREMENT")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                selectedType === "REQUIREMENT" ? "bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30" : "text-zinc-400 hover:text-zinc-200"
+                selectedType === "REQUIREMENT"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Requirements ({counts.REQUIREMENT || 0})
@@ -204,7 +296,9 @@ export default function SearchPage() {
             <button
               onClick={() => handleTypeChange("TASK")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                selectedType === "TASK" ? "bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30" : "text-zinc-400 hover:text-zinc-200"
+                selectedType === "TASK"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Tasks ({counts.TASK || 0})
@@ -212,7 +306,9 @@ export default function SearchPage() {
             <button
               onClick={() => handleTypeChange("DECISION")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                selectedType === "DECISION" ? "bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30" : "text-zinc-400 hover:text-zinc-200"
+                selectedType === "DECISION"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Decisions ({counts.DECISION || 0})
@@ -220,7 +316,9 @@ export default function SearchPage() {
             <button
               onClick={() => handleTypeChange("MEETING")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                selectedType === "MEETING" ? "bg-blue-500/20 text-blue-300 font-semibold border border-blue-500/30" : "text-zinc-400 hover:text-zinc-200"
+                selectedType === "MEETING"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Meetings ({counts.MEETING || 0})
@@ -228,10 +326,22 @@ export default function SearchPage() {
             <button
               onClick={() => handleTypeChange("DOCUMENT")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                selectedType === "DOCUMENT" ? "bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30" : "text-zinc-400 hover:text-zinc-200"
+                selectedType === "DOCUMENT"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               Documents ({counts.DOCUMENT || 0})
+            </button>
+            <button
+              onClick={() => handleTypeChange("GITHUB_ISSUE")}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                selectedType === "GITHUB_ISSUE"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              GitHub Issues ({counts.GITHUB_ISSUE || 0})
             </button>
           </div>
         )}
@@ -239,77 +349,124 @@ export default function SearchPage() {
         {/* Results Stream */}
         {loading ? (
           <div className="space-y-3">
-            <div className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
-            <div className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
+            <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+            <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
           </div>
         ) : !hasSearched ? (
-          <div className="text-center py-20 p-6 rounded-2xl border border-dashed border-white/10 bg-[#0d0e12] space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-600/10 text-cyan-400 flex items-center justify-center mx-auto">
+          <div className="text-center py-20 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center mx-auto border border-blue-100">
               <SearchIcon className="w-5 h-5" />
             </div>
-            <h3 className="text-sm font-semibold text-white">
+            <h3 className="text-sm font-semibold text-slate-900 font-serif">
               Instant Workspace Search
             </h3>
-            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-              Search by title, project key, or text content across all 5 workspace modules in <span className="text-indigo-400 font-semibold">{currentProject?.name}</span>.
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              Search by title, project key, or text content across all 5 workspace modules in{" "}
+              <span className="text-codex-accent font-semibold">{currentProject?.name}</span>.
             </p>
           </div>
         ) : results.length === 0 ? (
-          <div className="text-center py-16 p-6 rounded-2xl border border-dashed border-white/10 bg-[#0d0e12] space-y-3">
-            <h3 className="text-sm font-semibold text-white">No Matching Records Found</h3>
-            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-              No results found for "<span className="text-white">{query}</span>". Try different keywords or select another filter tab.
+          <div className="text-center py-16 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3">
+            <h3 className="text-sm font-semibold text-slate-900 font-serif">No Matching Records Found</h3>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              No results found for &quot;<span className="text-slate-900 font-medium">{query}</span>&quot;. Try different keywords or select another filter tab.
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="text-[11px] font-mono text-zinc-400">
-              Found {results.length} result(s) for "<span className="text-zinc-200">{query}</span>"
+            <div className="text-[11px] font-mono text-slate-400">
+              Found {results.length} result(s) for &quot;<span className="text-slate-700 font-semibold">{query}</span>&quot;
             </div>
             {results.map((item, idx) => {
               const Icon = TYPE_ICONS[item.type] || FileText;
-              const link = TYPE_LINKS[item.type] || "/dashboard";
-              const colorClass = TYPE_COLORS[item.type] || "bg-zinc-800 text-zinc-300";
+              const baseLink = TYPE_LINKS[item.type] || "/dashboard";
+              const searchParam = item.key || item.title;
+              const externalUrl = item.type === "GITHUB_ISSUE" && item.metadata?.htmlUrl ? (item.metadata.htmlUrl as string) : null;
+              const targetUrl = externalUrl || (searchParam ? `${baseLink}?search=${encodeURIComponent(searchParam)}` : baseLink);
+              const colorClass = TYPE_COLORS[item.type] || "bg-slate-100 text-slate-700";
 
               return (
                 <Card
                   key={item.id || idx}
-                  className="bg-[#121318] border-white/[0.08] hover:border-white/20 transition-all shadow-md group"
+                  className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md group rounded-2xl"
                 >
                   <CardContent className="p-4 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Badge className={`text-[10px] font-mono uppercase ${colorClass}`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase font-semibold ${colorClass}`}>
                           <Icon className="w-3 h-3 mr-1" />
                           <span>{item.type}</span>
-                        </Badge>
+                        </span>
                         {item.key && (
-                          <span className="font-mono text-xs font-semibold text-zinc-300 bg-white/[0.04] px-1.5 py-0.5 rounded">
+                          <span className="font-mono text-xs font-semibold text-codex-accent bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
                             {item.key}
                           </span>
                         )}
-                        <span className="text-xs font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                        {item.metadata?.score !== undefined && (
+                          <span
+                            className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-semibold"
+                            title="Relevance similarity score"
+                          >
+                            {typeof item.metadata.score === "number"
+                              ? `${(item.metadata.score > 1 ? item.metadata.score : item.metadata.score * 100).toFixed(1)}% match`
+                              : `Score: ${item.metadata.score}`}
+                          </span>
+                        )}
+                        <Link
+                          href={targetUrl}
+                          target={externalUrl ? "_blank" : undefined}
+                          rel={externalUrl ? "noopener noreferrer" : undefined}
+                          className="text-xs font-bold text-slate-900 group-hover:text-codex-accent transition-colors hover:underline font-serif"
+                        >
                           {item.title}
-                        </span>
+                        </Link>
                       </div>
 
-                      <Link href={link}>
-                        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-zinc-400 hover:text-white">
-                          <span>Open</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </Button>
-                      </Link>
+                      <div className="flex items-center gap-1.5">
+                        <Link
+                          href={`/assistant?prompt=${encodeURIComponent(
+                            `Tell me about ${item.type.toLowerCase()} [${item.key || ""}]: "${item.title}". Context: "${
+                              item.snippet || ""
+                            }".`
+                          )}`}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs gap-1 text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 px-2 shadow-2xs"
+                            title="Ask AI Copilot about this record"
+                          >
+                            <Sparkles className="w-3 h-3 text-codex-accent" />
+                            <span className="hidden sm:inline">Ask AI</span>
+                          </Button>
+                        </Link>
+
+                        <Link
+                          href={targetUrl}
+                          target={externalUrl ? "_blank" : undefined}
+                          rel={externalUrl ? "noopener noreferrer" : undefined}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs gap-1 text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 px-2 shadow-2xs"
+                          >
+                            <span>Open</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </Button>
+                        </Link>
+                      </div>
                     </div>
 
                     {item.snippet && (
-                      <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed bg-[#16171f] p-2.5 rounded-lg border border-white/[0.04]">
+                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                         {item.snippet}
                       </p>
                     )}
 
-                    <div className="flex items-center justify-between text-[11px] text-zinc-500 font-mono pt-1">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-1">
                       <span>{formatDate(item.createdAt)}</span>
-                      <span className="text-zinc-600">ID: {item.id.substring(0, 8)}...</span>
+                      <span className="text-slate-400">ID: {item.id.substring(0, 8)}...</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -317,7 +474,6 @@ export default function SearchPage() {
             })}
           </div>
         )}
-
       </div>
     </AppLayout>
   );

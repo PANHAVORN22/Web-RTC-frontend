@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
@@ -23,8 +24,11 @@ import {
   Tag,
   ChevronDown,
   ChevronUp,
+  CheckSquare,
+  Bot,
 } from "lucide-react";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { ConfirmModal } from "@/components/confirm-modal";
 
 function GithubIcon({ className = "w-5 h-5" }: { className?: string }) {
   return (
@@ -53,6 +57,7 @@ export default function IntegrationsPage() {
   // Action states
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [showConnectForm, setShowConnectForm] = useState(false);
 
   // Form state
@@ -83,6 +88,7 @@ export default function IntegrationsPage() {
     } finally {
       setLoadingConnection(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject]);
 
   const loadIssues = async (activeConn?: any) => {
@@ -95,10 +101,9 @@ export default function IntegrationsPage() {
         limit: 50,
       });
       setIssues(res.items || []);
-      setTotalIssues(res.total || 0);
+      setTotalIssues(res.total ?? res.items?.length ?? 0);
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Failed to load issues", "error");
     } finally {
       setLoadingIssues(false);
     }
@@ -110,31 +115,27 @@ export default function IntegrationsPage() {
 
   useEffect(() => {
     if (connection && connection.status === "CONNECTED") {
-      loadIssues();
+      loadIssues(connection);
     }
-  }, [selectedState, searchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedState]);
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentProject || !owner.trim() || !repo.trim()) return;
-
     setConnecting(true);
     try {
-      const res = await api.integrations.github.connect(currentProject.id, {
+      await api.integrations.github.connect(currentProject.id, {
         repositoryOwner: owner.trim(),
         repositoryName: repo.trim(),
         accessToken: token.trim() || undefined,
       });
-      setConnection(res);
+      showToast("Connected GitHub repository successfully!", "success");
       setShowConnectForm(false);
       setOwner("");
       setRepo("");
       setToken("");
-      showToast(
-        `Successfully connected ${res.repositoryOwner}/${res.repositoryName} and synced issues!`,
-        "success"
-      );
-      loadIssues(res);
+      await loadConnection();
     } catch (err: any) {
       showToast(err.message || "Failed to connect repository", "error");
     } finally {
@@ -148,7 +149,7 @@ export default function IntegrationsPage() {
     try {
       const res = await api.integrations.github.sync(currentProject.id);
       showToast(
-        `Synced ${res.syncedCount} issues from GitHub! Total: ${res.totalCount}`,
+        `Sync completed: ${res.syncedCount ?? 0} issues synchronized!`,
         "success"
       );
       await loadConnection();
@@ -161,21 +162,14 @@ export default function IntegrationsPage() {
 
   const handleDisconnect = async () => {
     if (!currentProject) return;
-    if (
-      !window.confirm(
-        "Are you sure you want to disconnect this repository? All synchronized issues will be deactivated from search and AI context immediately."
-      )
-    ) {
-      return;
-    }
-
     setDisconnecting(true);
     try {
       await api.integrations.github.disconnect(currentProject.id);
-      showToast("Repository disconnected and indexed sources deactivated.", "info");
+      showToast("Repository disconnected successfully", "info");
       setConnection(null);
       setIssues([]);
       setTotalIssues(0);
+      setShowDisconnectConfirm(false);
     } catch (err: any) {
       showToast(err.message || "Failed to disconnect", "error");
     } finally {
@@ -189,33 +183,33 @@ export default function IntegrationsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-5xl">
+      <div className="space-y-6 max-w-5xl mx-auto pb-12">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-codex-border pb-4">
           <div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-zinc-800 text-white flex items-center justify-center border border-white/10 shadow-sm">
-                <GithubIcon className="w-5 h-5" />
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-700 shadow-xs">
+                <GithubIcon className="w-4 h-4" />
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+              <h1 className="text-2xl font-bold tracking-tight text-codex-text font-serif">
                 Integrations
               </h1>
             </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Connect external developer tools. Synced issues are vectorized into your project's knowledge base and cited in AI conversations.
+            <p className="text-xs text-codex-muted mt-1">
+              Connect external developer tools. Synced issues are vectorized into your project&apos;s knowledge base and cited in AI conversations.
             </p>
           </div>
         </div>
 
         {/* GitHub Connection Status Card */}
         {loadingConnection ? (
-          <div className="h-36 rounded-xl bg-white/[0.03] animate-pulse" />
+          <div className="h-36 rounded-2xl bg-white border border-slate-200 animate-pulse" />
         ) : connection && connection.status === "CONNECTED" ? (
-          <Card className="bg-[#121318] border-white/[0.08] shadow-lg">
-            <CardHeader className="p-5 pb-3 border-b border-white/[0.06]">
+          <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl">
+            <CardHeader className="p-5 pb-3 border-b border-slate-100">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-white/10 flex items-center justify-center text-white shadow-inner">
+                  <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-white shadow-xs">
                     <GithubIcon className="w-5 h-5" />
                   </div>
                   <div>
@@ -224,18 +218,18 @@ export default function IntegrationsPage() {
                         href={`https://github.com/${connection.repositoryOwner}/${connection.repositoryName}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-sm font-bold text-white hover:text-indigo-400 transition-colors flex items-center gap-1.5"
+                        className="text-sm font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1.5 font-serif"
                       >
                         <span>
                           {connection.repositoryOwner}/{connection.repositoryName}
                         </span>
-                        <ExternalLink className="w-3.5 h-3.5 text-zinc-500" />
+                        <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                       </a>
-                      <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px]">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
                         CONNECTED
-                      </Badge>
+                      </span>
                     </div>
-                    <div className="text-[11px] text-zinc-400 flex items-center gap-2 mt-0.5 font-mono">
+                    <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
                       <span>{connection.issueCount ?? totalIssues} issues synced</span>
                       <span>•</span>
                       <span>
@@ -254,7 +248,7 @@ export default function IntegrationsPage() {
                     variant="outline"
                     disabled={syncing}
                     onClick={handleSync}
-                    className="h-8 text-xs border-white/10 hover:bg-white/5 text-zinc-200 gap-1.5"
+                    className="h-8 text-xs border-slate-200 hover:bg-slate-50 text-slate-700 gap-1.5 shadow-2xs"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
                     <span>{syncing ? "Syncing..." : "Sync Now"}</span>
@@ -264,8 +258,8 @@ export default function IntegrationsPage() {
                     size="sm"
                     variant="ghost"
                     disabled={disconnecting}
-                    onClick={handleDisconnect}
-                    className="h-8 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1.5"
+                    onClick={() => setShowDisconnectConfirm(true)}
+                    className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
                   >
                     <Unlink className="w-3.5 h-3.5" />
                     <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
@@ -275,21 +269,21 @@ export default function IntegrationsPage() {
             </CardHeader>
 
             <CardContent className="p-5 pt-3">
-              <p className="text-xs text-zinc-400 leading-relaxed">
+              <p className="text-xs text-slate-600 leading-relaxed">
                 Issues from this repository are indexed into your knowledge base. When you chat with the AI Assistant or search, relevant GitHub issues will be retrieved and cited as authorized project evidence.
               </p>
             </CardContent>
           </Card>
         ) : (
-          <div className="p-8 rounded-2xl border border-dashed border-white/10 bg-[#0d0e12] text-center space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-white/10 text-zinc-300 flex items-center justify-center mx-auto shadow-inner">
+          <div className="p-8 rounded-2xl border border-dashed border-slate-200 bg-white text-center space-y-4 shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-white flex items-center justify-center mx-auto shadow-xs">
               <GithubIcon className="w-6 h-6" />
             </div>
             <div className="max-w-md mx-auto space-y-1.5">
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-bold text-slate-900 font-serif">
                 Connect a GitHub Repository
               </h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
+              <p className="text-xs text-slate-500 leading-relaxed">
                 Synchronize issues from your GitHub repository to ground AI proposals and answers in real engineering tasks and bug reports.
               </p>
             </div>
@@ -297,7 +291,7 @@ export default function IntegrationsPage() {
             {!showConnectForm ? (
               <Button
                 onClick={() => setShowConnectForm(true)}
-                className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs gap-1.5 border border-white/10 shadow-sm"
+                className="bg-codex-accent hover:bg-codex-hover text-white text-xs gap-1.5 shadow-xs rounded-lg px-4"
               >
                 <GithubIcon className="w-4 h-4" />
                 <span>Connect Repository</span>
@@ -305,10 +299,10 @@ export default function IntegrationsPage() {
             ) : (
               <form
                 onSubmit={handleConnect}
-                className="max-w-md mx-auto p-4 rounded-xl bg-[#14161d] border border-white/10 text-left space-y-3 animate-in fade-in"
+                className="max-w-md mx-auto p-5 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-3 animate-in fade-in"
               >
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-zinc-300">
+                  <label className="text-xs font-semibold text-slate-700">
                     Repository Owner / Org *
                   </label>
                   <Input
@@ -316,12 +310,12 @@ export default function IntegrationsPage() {
                     value={owner}
                     onChange={(e) => setOwner(e.target.value)}
                     placeholder="e.g., facebook or your-username"
-                    className="h-8 text-xs bg-[#1a1b22] border-white/10 text-zinc-100"
+                    className="h-8 text-xs bg-white"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-zinc-300">
+                  <label className="text-xs font-semibold text-slate-700">
                     Repository Name *
                   </label>
                   <Input
@@ -329,23 +323,23 @@ export default function IntegrationsPage() {
                     value={repo}
                     onChange={(e) => setRepo(e.target.value)}
                     placeholder="e.g., react or ai-workspace"
-                    className="h-8 text-xs bg-[#1a1b22] border-white/10 text-zinc-100"
+                    className="h-8 text-xs bg-white"
                   />
                 </div>
 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-zinc-300">
+                    <label className="text-xs font-semibold text-slate-700">
                       Personal Access Token (Optional)
                     </label>
-                    <span className="text-[10px] text-zinc-500">For private repos</span>
+                    <span className="text-[10px] text-slate-400">For private repos</span>
                   </div>
                   <Input
                     type="password"
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
-                    placeholder="ghp_... (leave empty for public repos / mock)"
-                    className="h-8 text-xs bg-[#1a1b22] border-white/10 text-zinc-100 font-mono"
+                    placeholder="ghp_... (leave empty for public repos)"
+                    className="h-8 text-xs bg-white font-mono"
                   />
                 </div>
 
@@ -355,7 +349,7 @@ export default function IntegrationsPage() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowConnectForm(false)}
-                    className="text-xs text-zinc-400"
+                    className="text-xs text-slate-600 hover:text-slate-900"
                   >
                     Cancel
                   </Button>
@@ -363,7 +357,7 @@ export default function IntegrationsPage() {
                     type="submit"
                     size="sm"
                     disabled={connecting}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4"
+                    className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
                   >
                     {connecting ? "Connecting..." : "Confirm & Sync"}
                   </Button>
@@ -376,10 +370,10 @@ export default function IntegrationsPage() {
         {/* Synced Issues Section */}
         {connection && connection.status === "CONNECTED" && (
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-white/[0.06]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-200">
               <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-indigo-400" />
-                <h2 className="text-sm font-semibold text-white">
+                <Layers className="w-4 h-4 text-codex-accent" />
+                <h2 className="text-sm font-bold text-slate-900 font-serif">
                   Synchronized Issues ({totalIssues})
                 </h2>
               </div>
@@ -387,19 +381,19 @@ export default function IntegrationsPage() {
               {/* Filter Toolbar */}
               <div className="flex items-center gap-2">
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-zinc-500" />
-                  <Input
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                  <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search issues..."
-                    className="pl-8 h-7 text-xs bg-[#161820] border-white/10 text-zinc-200 w-44 sm:w-56"
+                    className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
                   />
                 </div>
 
                 <select
                   value={selectedState}
                   onChange={(e) => setSelectedState(e.target.value)}
-                  className="h-7 rounded-md bg-[#161820] border border-white/10 px-2.5 text-xs text-zinc-300 focus:outline-none cursor-pointer"
+                  className="h-7 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs cursor-pointer"
                 >
                   <option value="all">All States</option>
                   <option value="open">Open</option>
@@ -410,12 +404,12 @@ export default function IntegrationsPage() {
 
             {loadingIssues ? (
               <div className="space-y-3">
-                <div className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
-                <div className="h-20 rounded-xl bg-white/[0.03] animate-pulse" />
+                <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
               </div>
             ) : issues.length === 0 ? (
-              <div className="text-center py-12 p-4 rounded-xl border border-dashed border-white/10 bg-[#0d0e12] space-y-2">
-                <p className="text-xs text-zinc-400">
+              <div className="text-center py-12 p-6 rounded-2xl border border-dashed border-slate-200 bg-white space-y-2">
+                <p className="text-xs text-slate-500">
                   No issues found matching your search or state filter.
                 </p>
                 <Button
@@ -438,48 +432,48 @@ export default function IntegrationsPage() {
                   return (
                     <Card
                       key={issue.id}
-                      className="bg-[#121318] border-white/[0.08] hover:border-white/20 transition-all shadow-sm"
+                      className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md rounded-2xl"
                     >
                       <div className="p-4">
                         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                           <div className="flex items-start gap-2.5">
                             <span className="pt-0.5">
                               {isOpen ? (
-                                <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0 font-mono">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
                                   OPEN
-                                </Badge>
+                                </span>
                               ) : (
-                                <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px] px-1.5 py-0 font-mono">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200">
                                   CLOSED
-                                </Badge>
+                                </span>
                               )}
                             </span>
 
                             <div className="space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-xs font-bold text-zinc-400">
+                                <span className="font-mono text-xs font-bold text-slate-400">
                                   #{issue.issueNumber}
                                 </span>
                                 <a
                                   href={issue.htmlUrl}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="text-xs font-semibold text-white hover:text-indigo-400 transition-colors flex items-center gap-1"
+                                  className="text-xs font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1 font-serif"
                                 >
                                   <span>{issue.title}</span>
-                                  <ExternalLink className="w-3 h-3 text-zinc-500" />
+                                  <ExternalLink className="w-3 h-3 text-slate-400" />
                                 </a>
                               </div>
 
-                              <div className="flex items-center gap-3 text-[11px] text-zinc-400 font-mono flex-wrap">
+                              <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
                                 {issue.authorLogin && (
                                   <span className="flex items-center gap-1">
-                                    <User className="w-3 h-3 text-zinc-500" />
+                                    <User className="w-3 h-3 text-slate-400" />
                                     <span>{issue.authorLogin}</span>
                                   </span>
                                 )}
                                 <span className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-zinc-500" />
+                                  <Clock className="w-3 h-3 text-slate-400" />
                                   <span>Updated {formatDate(issue.githubUpdatedAt)}</span>
                                 </span>
                               </div>
@@ -489,7 +483,7 @@ export default function IntegrationsPage() {
                                   {issue.labels.map((label: string, idx: number) => (
                                     <span
                                       key={idx}
-                                      className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/10 text-zinc-300"
+                                      className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600"
                                     >
                                       {label}
                                     </span>
@@ -499,26 +493,60 @@ export default function IntegrationsPage() {
                             </div>
                           </div>
 
-                          {issue.body && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => toggleExpand(issue.id)}
-                              className="h-6 text-[11px] text-zinc-400 hover:text-white shrink-0 gap-1 self-end sm:self-start"
+                          <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 flex-wrap">
+                            <Link
+                              href={`/tasks?create=true&title=${encodeURIComponent(
+                                `[GH-#${issue.issueNumber}] ${issue.title}`
+                              )}`}
                             >
-                              <span>{isExpanded ? "Hide Body" : "View Body"}</span>
-                              {isExpanded ? (
-                                <ChevronUp className="w-3 h-3" />
-                              ) : (
-                                <ChevronDown className="w-3 h-3" />
-                              )}
-                            </Button>
-                          )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
+                                title="Create workspace task from this GitHub issue"
+                              >
+                                <CheckSquare className="w-3 h-3 text-[#2D8A60]" />
+                                <span>Create Task</span>
+                              </Button>
+                            </Link>
+                            <Link
+                              href={`/assistant?prompt=${encodeURIComponent(
+                                `Analyze GitHub issue #${issue.issueNumber}: "${issue.title}". Body: "${
+                                  issue.body || "No description"
+                                }". How should we implement and test this?`
+                              )}&mode=DEVELOPER`}
+                            >
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
+                                title="Ask Copilot about this issue"
+                              >
+                                <Bot className="w-3 h-3 text-codex-accent" />
+                                <span className="hidden md:inline">Ask Copilot</span>
+                              </Button>
+                            </Link>
+                            {issue.body && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleExpand(issue.id)}
+                                className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 shrink-0 gap-1 px-2.5 shadow-2xs"
+                              >
+                                <span>{isExpanded ? "Hide Body" : "View Body"}</span>
+                                {isExpanded ? (
+                                  <ChevronUp className="w-3 h-3" />
+                                ) : (
+                                  <ChevronDown className="w-3 h-3" />
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         </div>
 
                         {/* Collapsible Body preview */}
                         {isExpanded && issue.body && (
-                          <div className="mt-3 p-3 rounded-lg bg-black/30 border border-white/[0.04] text-xs text-zinc-300 font-mono whitespace-pre-wrap leading-relaxed animate-in fade-in">
+                          <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed animate-in fade-in">
                             {issue.body}
                           </div>
                         )}
@@ -531,6 +559,19 @@ export default function IntegrationsPage() {
           </div>
         )}
       </div>
+
+      {/* Disconnect Confirmation Modal Card */}
+      <ConfirmModal
+        isOpen={showDisconnectConfirm}
+        onClose={() => !disconnecting && setShowDisconnectConfirm(false)}
+        onConfirm={handleDisconnect}
+        title="Disconnect Repository"
+        description="Are you sure you want to disconnect this repository? Synced issues will be unlinked from this workspace."
+        confirmText="Disconnect"
+        cancelText="Cancel"
+        variant="danger"
+        loading={disconnecting}
+      />
     </AppLayout>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
-
+import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
@@ -22,18 +22,21 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
-  BookOpen
+  BookOpen,
+  CheckSquare,
+  GitPullRequest,
+  Bot,
+  FileCheck2,
 } from "lucide-react";
 import { formatDateTime, formatDate } from "@/lib/utils";
 
 export default function MeetingsPage() {
-  
   const { currentProject } = useAuth();
   const { showToast } = useToast();
   const [meetings, setMeetings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  
+
   // Search & Expansion state
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedMeetingId, setExpandedMeetingId] = useState<string | null>(null);
@@ -86,10 +89,18 @@ export default function MeetingsPage() {
   };
 
   useEffect(() => {
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("create") === "true") {
-      setShowCreate(true);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("create") === "true") {
+        setShowCreate(true);
+      }
+      const q = params.get("search");
+      if (q) {
+        setSearchQuery(q);
+      }
     }
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -132,8 +143,9 @@ export default function MeetingsPage() {
   const filteredMeetings = useMemo(() => {
     return meetings.filter((m) => {
       if (searchQuery.trim() === "") return true;
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
       return (
+        m.id.toLowerCase() === q ||
         m.title.toLowerCase().includes(q) ||
         (m.agenda && m.agenda.toLowerCase().includes(q)) ||
         (m.notes && m.notes.toLowerCase().includes(q))
@@ -143,135 +155,148 @@ export default function MeetingsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-5xl">
-        
+      <div className="space-y-6 max-w-6xl mx-auto pb-12">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-codex-border pb-4">
           <div>
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-600/15 text-blue-400 flex items-center justify-center">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center border border-blue-100">
                 <Calendar className="w-4 h-4" />
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-                Meetings & Transcripts
+              <h1 className="text-2xl font-bold tracking-tight text-codex-text font-serif">
+                Meeting Logs & Minutes
               </h1>
             </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Record team discussions, decisions, and paste raw transcripts. Transcripts support version tracking and team indexing.
+            <p className="text-xs text-codex-muted mt-1">
+              Capture meeting schedules, agendas, collaborative notes, and transcripts with automatic AI action item extraction.
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => setShowCreate(!showCreate)}
-            className="gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white shadow-md self-start sm:self-auto"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{showCreate ? "Close Form" : "Log Meeting"}</span>
-          </Button>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <Link href="/tasks">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs"
+              >
+                <CheckSquare className="w-3.5 h-3.5 text-codex-accent" />
+                <span>Action Tasks</span>
+              </Button>
+            </Link>
+            <Button
+              size="sm"
+              onClick={() => setShowCreate(!showCreate)}
+              className="gap-1.5 text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-xs rounded-lg px-4"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{showCreate ? "Close Form" : "Log Meeting"}</span>
+            </Button>
+          </div>
         </div>
 
         {/* Create Meeting Card */}
         {showCreate && (
-          <Card className="border-blue-500/30 bg-[#101116] shadow-2xl animate-in fade-in slide-in-from-top-2">
-            <CardHeader className="pb-3 border-b border-white/[0.06]">
-              <CardTitle className="text-sm font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-blue-400" />
+          <Card className="border-slate-200 bg-white shadow-lg animate-in fade-in slide-in-from-top-2 rounded-2xl">
+            <CardHeader className="pb-3 border-b border-slate-100">
+              <CardTitle className="text-sm font-bold text-slate-900 font-serif flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-codex-accent" />
                 <span>Log New Team Meeting</span>
               </CardTitle>
             </CardHeader>
             <form onSubmit={handleCreate}>
               <div className="p-5 space-y-4">
                 {errorMsg && (
-                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-codex-warning text-xs flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     <span>{errorMsg}</span>
                   </div>
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-300">Meeting Title *</label>
+                  <label className="text-xs font-semibold text-slate-700">Meeting Title *</label>
                   <Input
                     required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="e.g., Sprint Planning & Architecture Review"
-                    className="h-9 text-xs bg-[#161820] border-white/10 text-zinc-100"
+                    className="h-9 text-xs"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-300">Date *</label>
+                    <label className="text-xs font-semibold text-slate-700">Date *</label>
                     <Input
                       type="date"
                       required
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
-                      className="h-9 text-xs bg-[#161820] border-white/10 text-zinc-100"
+                      className="h-9 text-xs"
                     />
                   </div>
+
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-300">Start Time *</label>
+                    <label className="text-xs font-semibold text-slate-700">Start Time *</label>
                     <Input
                       type="time"
                       required
                       value={startTime}
                       onChange={(e) => setStartTime(e.target.value)}
-                      className="h-9 text-xs bg-[#161820] border-white/10 text-zinc-100"
+                      className="h-9 text-xs"
                     />
                   </div>
+
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-zinc-300">End Time *</label>
+                    <label className="text-xs font-semibold text-slate-700">End Time *</label>
                     <Input
                       type="time"
                       required
                       value={endTime}
                       onChange={(e) => setEndTime(e.target.value)}
-                      className="h-9 text-xs bg-[#161820] border-white/10 text-zinc-100"
+                      className="h-9 text-xs"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-300">Agenda Topics</label>
+                  <label className="text-xs font-semibold text-slate-700">Agenda</label>
                   <Input
                     value={agenda}
                     onChange={(e) => setAgenda(e.target.value)}
-                    placeholder="e.g., 1. Review Phase 1 scope 2. Assign tasks 3. QA readiness"
-                    className="h-9 text-xs bg-[#161820] border-white/10 text-zinc-100"
+                    placeholder="e.g., Discuss pgvector chunking, review PRs, assign phase 2 tasks"
+                    className="h-9 text-xs"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-zinc-300">Key Notes & Decisions</label>
+                  <label className="text-xs font-semibold text-slate-700">Meeting Notes & Summary</label>
                   <textarea
                     rows={3}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Summary of key discussion points, conclusions, and action items..."
-                    className="w-full rounded-md bg-[#161820] border border-white/10 p-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Document decisions, conclusions, open questions, and next steps..."
+                    className="w-full rounded-lg bg-white border border-slate-200 p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs"
                   />
                 </div>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-zinc-300">Raw Transcript (Optional)</label>
-                    <span className="text-[10px] text-zinc-500 font-mono">Pasted text / audio export</span>
+                    <label className="text-xs font-semibold text-slate-700">Raw Transcript (Optional)</label>
+                    <span className="text-[10px] text-slate-400">Paste Zoom/Teams transcript for AI analysis</span>
                   </div>
                   <textarea
                     rows={4}
                     value={transcriptText}
                     onChange={(e) => setTranscriptText(e.target.value)}
-                    placeholder="Paste verbatim transcript text here. Useful for search and AI analysis..."
-                    className="w-full rounded-md bg-[#161820] border border-white/10 p-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                    placeholder="Paste full transcript text here. AI assistant will parse this to propose requirements and tasks..."
+                    className="w-full rounded-lg bg-white border border-slate-200 p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-codex-accent font-mono text-[11px] shadow-2xs"
                   />
                 </div>
               </div>
 
-              <div className="p-4 bg-white/[0.02] border-t border-white/[0.06] flex justify-end gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2 rounded-b-2xl">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={() => setShowCreate(false)}
                   className="text-xs"
@@ -282,137 +307,236 @@ export default function MeetingsPage() {
                   type="submit"
                   size="sm"
                   disabled={submitting}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4"
+                  className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
                 >
-                  {submitting ? "Saving..." : "Save Meeting"}
+                  {submitting ? "Saving..." : "Log Meeting"}
                 </Button>
               </div>
             </form>
           </Card>
         )}
 
-        {/* Search Toolbar */}
+        {/* Search Bar */}
         <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-zinc-500" />
-          <Input
+          <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+          <input
+            type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search meetings by title, agenda, or notes..."
-            className="pl-8 h-8 text-xs bg-[#161820] border-white/10 text-zinc-200"
+            placeholder="Search meetings by title, agenda, or notes content..."
+            className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent focus:border-codex-accent shadow-xs"
           />
         </div>
 
         {/* Meetings List */}
         {loading ? (
           <div className="space-y-3">
-            <div className="h-28 rounded-xl bg-white/[0.03] animate-pulse" />
-            <div className="h-28 rounded-xl bg-white/[0.03] animate-pulse" />
+            <div className="h-28 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+            <div className="h-28 rounded-2xl bg-white border border-slate-200 animate-pulse" />
           </div>
         ) : filteredMeetings.length === 0 ? (
-          <div className="text-center py-16 p-6 rounded-2xl border border-dashed border-white/10 bg-[#0d0e12] space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-400 flex items-center justify-center mx-auto">
+          <div className="text-center py-16 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center mx-auto border border-blue-100">
               <Calendar className="w-5 h-5" />
             </div>
-            <h3 className="text-sm font-semibold text-white">
+            <h3 className="text-sm font-semibold text-slate-900 font-serif">
               {meetings.length === 0 ? "No Meetings Recorded Yet" : "No Matching Meetings Found"}
             </h3>
-            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
               {meetings.length === 0
-                ? "Keep track of team sprint reviews, standups, and discussions in one central place."
-                : "Try clearing your search query to see all meetings."}
+                ? "Keep everyone on the same page by logging meeting minutes and analyzing transcripts with AI."
+                : "Try searching with different keywords."}
             </p>
             {meetings.length === 0 ? (
-              <Button size="sm" onClick={() => setShowCreate(true)} className="text-xs bg-blue-600 hover:bg-blue-500">
+              <Button
+                size="sm"
+                onClick={() => setShowCreate(true)}
+                className="text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-xs"
+              >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Log First Meeting
               </Button>
             ) : (
-              <Button variant="outline" size="sm" onClick={() => setSearchQuery("")} className="text-xs">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSearchQuery("")}
+                className="text-xs"
+              >
                 Clear Search
               </Button>
             )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {filteredMeetings.map((meeting) => {
               const isExpanded = expandedMeetingId === meeting.id;
+              const hasContentForAi = Boolean(meeting.notes || meeting.transcriptText);
+              const isSearchMatch =
+                searchQuery.trim() !== "" &&
+                meeting.title.toLowerCase().includes(searchQuery.toLowerCase());
+
               return (
                 <Card
                   key={meeting.id}
-                  className="bg-[#121318] border-white/[0.08] hover:border-white/20 transition-all shadow-md"
+                  className={`bg-white border transition-all duration-150 shadow-xs hover:shadow-md ${
+                    isSearchMatch ? "border-codex-accent ring-1 ring-codex-accent/40" : "border-slate-200"
+                  }`}
                 >
-                  <CardHeader className="p-4 pb-2">
+                  <CardHeader className="p-5 pb-2">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-[10px] font-mono border-white/10 text-blue-400 bg-blue-500/10">
-                          {meeting.startsAt ? formatDateTime(meeting.startsAt) : "Scheduled"}
-                        </Badge>
-                        {meeting.transcriptVersion > 0 && (
-                          <Badge variant="secondary" className="text-[10px] font-mono text-zinc-400">
-                            Transcript v{meeting.transcriptVersion}
-                          </Badge>
-                        )}
-                        {meeting.attendees && meeting.attendees.length > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
-                            <Users className="w-3 h-3" />
-                            <span>{meeting.attendees.length} attendee(s)</span>
+                      <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500">
+                        <span className="flex items-center gap-1 font-mono text-slate-700 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-md">
+                          <Clock className="w-3.5 h-3.5 text-codex-accent" />
+                          <span>{formatDateTime(meeting.startsAt)}</span>
+                        </span>
+                        {meeting.transcriptText && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-codex-accent border border-blue-100">
+                            Transcript Included
                           </span>
                         )}
                       </div>
 
+                      {/* Actions: AI Analyze + Expand */}
                       <div className="flex items-center gap-2 self-start sm:self-auto">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={generatingProposalId === meeting.id}
-                          onClick={() => handleGenerateAnalysis(meeting)}
-                          className="h-7 text-[11px] border-blue-500/30 bg-blue-600/10 hover:bg-blue-600/20 text-blue-300 gap-1 px-2.5"
-                        >
-                          <Sparkles className={`w-3 h-3 ${generatingProposalId === meeting.id ? "animate-spin" : "text-blue-400"}`} />
-                          <span>{generatingProposalId === meeting.id ? "Analyzing..." : "AI Analysis"}</span>
-                        </Button>
+                        {hasContentForAi && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={generatingProposalId === meeting.id}
+                            onClick={() => handleGenerateAnalysis(meeting)}
+                            className="h-7 text-[11px] border-blue-200 bg-blue-50 hover:bg-blue-100 text-codex-accent gap-1 px-2.5 font-medium shadow-2xs"
+                            title="AI extracts requirements, decisions, and tasks from notes and transcript"
+                          >
+                            <Sparkles
+                              className={`w-3 h-3 ${
+                                generatingProposalId === meeting.id ? "animate-spin" : "text-codex-accent"
+                              }`}
+                            />
+                            <span>{generatingProposalId === meeting.id ? "Analyzing..." : "Analyze with AI"}</span>
+                          </Button>
+                        )}
 
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => setExpandedMeetingId(isExpanded ? null : meeting.id)}
-                          className="h-7 text-[11px] text-zinc-400 hover:text-white gap-1"
+                          className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
                         >
-                          <span>{isExpanded ? "Hide Details" : "View Notes & Transcript"}</span>
+                          <span>{isExpanded ? "Hide Details" : "View Details"}</span>
                           {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                         </Button>
                       </div>
                     </div>
 
-                    <CardTitle className="text-sm font-semibold text-white pt-2 leading-snug">
+                    <CardTitle className="text-base font-bold text-slate-900 font-serif pt-2 leading-snug">
                       {meeting.title}
                     </CardTitle>
                   </CardHeader>
 
-                  <CardContent className="p-4 pt-1 space-y-3">
+                  <CardContent className="p-5 pt-1 space-y-3">
                     {meeting.agenda && (
-                      <div className="text-xs text-zinc-400">
-                        <strong className="text-zinc-300">Agenda:</strong> {meeting.agenda}
+                      <div className="text-xs text-slate-600">
+                        <strong className="text-slate-900 font-semibold">Agenda:</strong> {meeting.agenda}
                       </div>
                     )}
 
                     {meeting.notes && (
-                      <div className="text-xs text-zinc-300 leading-relaxed bg-[#16171f] p-3 rounded-lg border border-white/[0.04]">
+                      <div className="text-xs text-slate-800 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                         {meeting.notes}
                       </div>
                     )}
 
                     {/* Expandable Transcript Drawer */}
                     {isExpanded && meeting.transcriptText && (
-                      <div className="p-3 rounded-lg bg-black/30 border border-white/[0.06] space-y-1.5 animate-in fade-in">
-                        <div className="text-[11px] font-mono uppercase text-zinc-400 flex items-center gap-1.5">
-                          <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 animate-in fade-in">
+                        <div className="text-[11px] font-mono uppercase text-slate-600 flex items-center gap-1.5 font-bold">
+                          <BookOpen className="w-3.5 h-3.5 text-codex-accent" />
                           <span>Full Meeting Transcript (v{meeting.transcriptVersion})</span>
                         </div>
-                        <div className="text-xs text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto p-2 bg-black/20 rounded border border-white/5">
+                        <div className="text-xs text-slate-700 whitespace-pre-wrap font-mono leading-relaxed max-h-60 overflow-y-auto p-3 bg-white rounded-lg border border-slate-200">
                           {meeting.transcriptText}
                         </div>
                       </div>
                     )}
+
+                    {/* Cross-Workflow Actions Hub */}
+                    <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Create Action Task linked to this meeting */}
+                        <Link
+                          href={`/tasks?create=true&meetingId=${meeting.id}&title=${encodeURIComponent(
+                            `Follow-up from meeting: ${meeting.title}`
+                          )}`}
+                        >
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
+                            title="Create an actionable task linked to this meeting"
+                          >
+                            <CheckSquare className="w-3 h-3 text-[#2D8A60]" />
+                            <span>Add Task</span>
+                          </Button>
+                        </Link>
+
+                        {/* Create Requirement from meeting */}
+                        <Link
+                          href={`/requirements?create=true&title=${encodeURIComponent(
+                            `Requirement from meeting: ${meeting.title}`
+                          )}`}
+                        >
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
+                            title="Capture a requirement identified in this meeting"
+                          >
+                            <FileCheck2 className="w-3 h-3 text-blue-600" />
+                            <span>Create REQ</span>
+                          </Button>
+                        </Link>
+
+                        {/* Log Decision */}
+                        <Link
+                          href={`/decisions?create=true&title=${encodeURIComponent(
+                            `Decision from: ${meeting.title}`
+                          )}`}
+                        >
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
+                            title="Log a decision agreed upon during this meeting"
+                          >
+                            <GitPullRequest className="w-3 h-3 text-purple-600" />
+                            <span>Log Decision</span>
+                          </Button>
+                        </Link>
+
+                        {/* Ask Copilot */}
+                        <Link
+                          href={`/assistant?prompt=${encodeURIComponent(
+                            `Summarize meeting "${meeting.title}". Agenda: "${meeting.agenda || ""}". Notes: "${
+                              meeting.notes || ""
+                            }". What key conclusions and follow-ups should be tracked?`
+                          )}&mode=PM`}
+                        >
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
+                            title="Query Copilot regarding this meeting"
+                          >
+                            <Bot className="w-3 h-3 text-codex-accent" />
+                            <span className="hidden sm:inline">Ask Copilot</span>
+                          </Button>
+                        </Link>
+                      </div>
+
+                      <div className="text-[11px] text-slate-400 font-mono">
+                        Logged {formatDate(meeting.createdAt)}
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               );
@@ -420,6 +544,30 @@ export default function MeetingsPage() {
           </div>
         )}
 
+        {/* Workflow Progression Banner */}
+        <div className="mt-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center shrink-0 border border-blue-100">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-900 font-serif">
+                Next in Workflow: Convert Notes to Action
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Run AI analysis on meeting minutes to automatically draft proposed requirements and sprint tasks with one click.
+              </p>
+            </div>
+          </div>
+          <Link href="/tasks">
+            <Button
+              size="sm"
+              className="text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-xs shrink-0"
+            >
+              View Tasks Board →
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {activeProposal && currentProject && (
