@@ -25,6 +25,25 @@ export interface ApiEnvelope<T = any, M = any> {
   meta?: M;
 }
 
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  details?: Array<{ field: string; message: string }>;
+
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    details?: Array<{ field: string; message: string }>
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
 export async function apiRequestRaw(
   endpoint: string,
   options: RequestInit = {}
@@ -55,20 +74,26 @@ export async function apiRequestRaw(
 
   if (!res.ok) {
     let errorMsg = `Request failed with status ${res.status}`;
+    let errorCode: string | undefined;
+    let errorDetails: Array<{ field: string; message: string }> | undefined;
+
     try {
       const errJson = await res.json();
-      if (errJson.message) {
-        errorMsg = errJson.message;
-      } else if (errJson.error?.message) {
-        errorMsg = errJson.error.message;
+      const errObj = errJson.error || errJson;
+      if (errObj.message) {
+        errorMsg = errObj.message;
       }
-      if (errJson.details && Array.isArray(errJson.details) && errJson.details.length > 0) {
-        errorMsg += `: ${errJson.details.map((d: any) => d.message).join(", ")}`;
+      if (errObj.code) {
+        errorCode = errObj.code;
+      }
+      const rawDetails = errObj.details || errJson.details;
+      if (Array.isArray(rawDetails) && rawDetails.length > 0) {
+        errorDetails = rawDetails;
       }
     } catch {
       // fallback
     }
-    throw new Error(errorMsg);
+    throw new ApiError(errorMsg, res.status, errorCode, errorDetails);
   }
 
   return res;
@@ -121,6 +146,17 @@ export const api = {
       }
       return data;
     },
+    register: async (email: string, password: string, displayName?: string) => {
+      const envelope = await apiEnvelopeRequest<{ user: any; csrfToken: string }>("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email, password, displayName }),
+      });
+      const data = envelope.data;
+      if (data?.csrfToken) {
+        setCsrfToken(data.csrfToken);
+      }
+      return data;
+    },
     logout: async () => {
       try {
         await apiRequestRaw("/auth/logout", { method: "POST" });
@@ -139,7 +175,27 @@ export const api = {
     get: async (id: string) => apiRequest<any>(`/projects/${id}`),
     create: async (data: { name: string; key: string; description?: string }) =>
       apiRequest<any>("/projects", { method: "POST", body: JSON.stringify(data) }),
+    update: async (id: string, data: { name?: string; description?: string }) =>
+      apiRequest<any>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    archive: async (id: string) =>
+      apiRequest<any>(`/projects/${id}/archive`, { method: "POST" }),
+    unarchive: async (id: string) =>
+      apiRequest<any>(`/projects/${id}/unarchive`, { method: "POST" }),
     getMembers: async (id: string) => apiRequest<any[]>(`/projects/${id}/members`),
+    addMember: async (id: string, data: { email: string; accessRole: string }) =>
+      apiRequest<any>(`/projects/${id}/members`, { method: "POST", body: JSON.stringify(data) }),
+    updateMemberRole: async (id: string, userId: string, data: { accessRole: string }) =>
+      apiRequest<any>(`/projects/${id}/members/${userId}`, { method: "PATCH", body: JSON.stringify(data) }),
+    removeMember: async (id: string, userId: string) =>
+      apiRequestRaw(`/projects/${id}/members/${userId}`, { method: "DELETE" }),
+    transferOwnership: async (id: string, data: { newOwnerUserId: string }) =>
+      apiRequest<any>(`/projects/${id}/ownership-transfer`, { method: "POST", body: JSON.stringify(data) }),
+    getMemberCandidates: async (id: string, search?: string) => {
+      const q = search ? `?search=${encodeURIComponent(search)}` : "";
+      return apiRequest<any[]>(`/projects/${id}/member-candidates${q}`);
+    },
+    getAuditLogs: async (id: string, page = 1, pageSize = 50) =>
+      apiEnvelopeRequest<any[]>(`/projects/${id}/audit?page=${page}&pageSize=${pageSize}`),
   },
 
   dashboard: {
@@ -150,8 +206,15 @@ export const api = {
   },
 
   search: {
-    query: async (projectId: string, q: string, type?: string, page = 1, pageSize = 20) => {
-      let queryUrl = `/projects/${projectId}/search?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`;
+    query: async (
+      projectId: string,
+      q: string,
+      type?: string,
+      page = 1,
+      pageSize = 20,
+      mode: "keyword" | "semantic" | "hybrid" = "hybrid"
+    ) => {
+      let queryUrl = `/projects/${projectId}/search?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}&mode=${mode}`;
       if (type && type.trim()) {
         queryUrl += `&type=${encodeURIComponent(type.trim().toUpperCase())}`;
       }
@@ -190,6 +253,10 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
+    listRevisions: async (projectId: string, requirementId: string) =>
+      apiRequest<any[]>(`/projects/${projectId}/requirements/${requirementId}/revisions`),
+    listTasks: async (projectId: string, requirementId: string) =>
+      apiRequest<any[]>(`/projects/${projectId}/requirements/${requirementId}/tasks`),
   },
 
   decisions: {
@@ -217,12 +284,15 @@ export const api = {
         decisionText?: string;
         rationale?: string;
         status?: string;
+        supersedesDecisionId?: string;
       }
     ) =>
       apiRequest<any>(`/projects/${projectId}/decisions/${decisionId}`, {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
+    listRevisions: async (projectId: string, decisionId: string) =>
+      apiRequest<any[]>(`/projects/${projectId}/decisions/${decisionId}/revisions`),
   },
 
   tasks: {
@@ -283,6 +353,13 @@ export const api = {
     list: async (projectId: string) => apiRequest<any[]>(`/projects/${projectId}/documents`),
     upload: async (projectId: string, formData: FormData) =>
       apiRequest<any>(`/projects/${projectId}/documents`, { method: "POST", body: formData }),
+    uploadRevision: async (projectId: string, documentId: string, formData: FormData) =>
+      apiRequest<any>(`/projects/${projectId}/documents/${documentId}/revisions`, {
+        method: "POST",
+        body: formData,
+      }),
+    listRevisions: async (projectId: string, documentId: string) =>
+      apiRequest<any[]>(`/projects/${projectId}/documents/${documentId}/revisions`),
     getDownloadUrl: (projectId: string, docId: string) =>
       `${API_URL}/projects/${projectId}/documents/${docId}/download`,
     downloadFile: async (projectId: string, docId: string, filename: string) => {

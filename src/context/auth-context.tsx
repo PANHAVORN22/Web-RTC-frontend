@@ -34,6 +34,7 @@ export interface AuthContextType {
   currentProject: Project | null;
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<void>;
+  register: (email: string, pass: string, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
   setCurrentProject: (proj: Project | null) => void;
   refreshProjects: () => Promise<void>;
@@ -45,6 +46,7 @@ const AuthContext = createContext<AuthContextType>({
   currentProject: null,
   isLoading: true,
   login: async () => {},
+  register: async () => {},
   logout: async () => {},
   setCurrentProject: () => {},
   refreshProjects: async () => {},
@@ -116,6 +118,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const register = async (email: string, pass: string, displayName?: string) => {
+    setIsLoading(true);
+    try {
+      const data = await api.auth.register(email, pass, displayName);
+      setUser(data.user);
+      await refreshProjects();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await api.auth.logout();
@@ -136,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         currentProject,
         isLoading,
         login,
+        register,
         logout,
         setCurrentProject,
         refreshProjects,
