@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
@@ -157,6 +158,11 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // View mode: Grid vs List
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -444,7 +450,7 @@ export default function DocumentsPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
+      <div className="space-y-6">
         {/* BREADCRUMB & HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -823,13 +829,15 @@ export default function DocumentsPage() {
         )}
 
         {/* UPLOAD DOCUMENT MODAL */}
-        {uploadModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div
-              className="fixed inset-0"
-              onClick={() => !uploading && setUploadModalOpen(false)}
-            />
-            <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95">
+        {mounted &&
+          uploadModalOpen &&
+          createPortal(
+            <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div
+                className="fixed inset-0"
+                onClick={() => !uploading && setUploadModalOpen(false)}
+              />
+              <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <Upload className="w-4 h-4 text-blue-600" />
@@ -969,15 +977,18 @@ export default function DocumentsPage() {
                 </div>
               </form>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* DOCUMENT DETAILS MODAL */}
-        {selectedDoc && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div className="fixed inset-0" onClick={() => setSelectedDoc(null)} />
-            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
-              {/* Header */}
+        {mounted &&
+          selectedDoc &&
+          createPortal(
+            <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="fixed inset-0" onClick={() => setSelectedDoc(null)} />
+              <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
+                {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                 <div className="flex items-center gap-3 min-w-0 pr-4">
                   {renderTypeIcon(
@@ -1086,15 +1097,18 @@ export default function DocumentsPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* REVISIONS MODAL */}
-        {revisionsModalDoc && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div className="fixed inset-0" onClick={() => setRevisionsModalDoc(null)} />
-            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[85vh] flex flex-col">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+        {mounted &&
+          revisionsModalDoc &&
+          createPortal(
+            <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="fixed inset-0" onClick={() => setRevisionsModalDoc(null)} />
+              <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-blue-600" />
                   <h3 className="text-sm font-bold text-slate-900 truncate">
@@ -1192,7 +1206,8 @@ export default function DocumentsPage() {
                 )}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </AppLayout>
