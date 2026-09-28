@@ -228,6 +228,24 @@ export const api = {
       if (status) url += `?status=${encodeURIComponent(status)}`;
       return apiRequest<any[]>(url);
     },
+    listAll: async (params?: {
+      projectId?: string;
+      status?: string;
+      priority?: string;
+      search?: string;
+      page?: number;
+      pageSize?: number;
+    }) => {
+      const q = new URLSearchParams();
+      if (params?.projectId && params.projectId !== "ALL") q.append("projectId", params.projectId);
+      if (params?.status && params.status !== "ALL") q.append("status", params.status);
+      if (params?.priority && params.priority !== "ALL") q.append("priority", params.priority);
+      if (params?.search) q.append("search", params.search);
+      if (params?.page) q.append("page", String(params.page));
+      if (params?.pageSize) q.append("pageSize", String(params.pageSize));
+      const qs = q.toString() ? `?${q.toString()}` : "";
+      return apiEnvelopeRequest<any[]>(`/requirements${qs}`);
+    },
     create: async (
       projectId: string,
       data: {
@@ -257,6 +275,10 @@ export const api = {
       apiRequest<any[]>(`/projects/${projectId}/requirements/${requirementId}/revisions`),
     listTasks: async (projectId: string, requirementId: string) =>
       apiRequest<any[]>(`/projects/${projectId}/requirements/${requirementId}/tasks`),
+    delete: async (projectId: string, requirementId: string) =>
+      apiRequest<any>(`/projects/${projectId}/requirements/${requirementId}`, {
+        method: "DELETE",
+      }),
   },
 
   decisions: {
