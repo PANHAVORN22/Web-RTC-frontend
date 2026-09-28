@@ -6,508 +6,654 @@ import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Plus,
   Calendar,
-  Clock,
-  AlertTriangle,
   Search,
-  CheckCircle2,
-  Copy,
-  ListTodo,
-  CheckSquare,
-  ArrowRight,
-  Filter,
+  Check,
+  LayoutGrid,
+  List,
+  ChevronDown,
+  AlertCircle,
+  X,
+  Trash2,
+  AlertTriangle,
   Sparkles,
   Link as LinkIcon,
   Bot,
-  FileCheck2,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+
+interface ProjectInfo {
+  id: string;
+  name: string;
+  key: string;
+}
+
+interface AssigneeInfo {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+interface TaskItem {
+  id: string;
+  projectId: string;
+  number: number;
+  displayKey: string;
+  title: string;
+  description?: string | null;
+  status: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED" | "IN_REVIEW" | "CANCELLED";
+  priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+  assigneeId?: string | null;
+  assignee?: AssigneeInfo | null;
+  project?: ProjectInfo | null;
+  blockedReason?: string | null;
+  dueDate?: string | null;
+  requirementId?: string | null;
+  sourceMeetingId?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const COLUMNS: Array<{
+  status: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED";
+  label: string;
+  dotColor: string;
+}> = [
+  { status: "TODO", label: "TO DO", dotColor: "#94a3b8" },
+  { status: "IN_PROGRESS", label: "IN PROGRESS", dotColor: "#3b82f6" },
+  { status: "DONE", label: "DONE", dotColor: "#10b981" },
+  { status: "BLOCKED", label: "BLOCKED", dotColor: "#ef4444" },
+];
+
+function formatDueDate(dueDateStr: string | null | undefined): string {
+  if (!dueDateStr) return "-";
+  try {
+    const parts = dueDateStr.split("-");
+    if (parts.length === 3) {
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const monthIndex = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      return `${day} ${monthNames[monthIndex] || "Sep"}`;
+    }
+    const d = new Date(dueDateStr);
+    if (isNaN(d.getTime())) return dueDateStr;
+    const month = d.toLocaleDateString("en-US", { month: "short" });
+    return `${d.getDate()} ${month}`;
+  } catch {
+    return dueDateStr;
+  }
+}
+
+function getInitials(name?: string | null): string {
+  if (!name) return "??";
+  const trimmed = name.trim();
+  if (trimmed === "Panhavorn") return "NP";
+  if (trimmed === "Meng Fong") return "NS";
+  if (trimmed === "Mengchheang") return "MC";
+  if (trimmed === "John Smith") return "JS";
+  if (trimmed === "Jane Doe") return "JD";
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getAssigneeColor(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed === "Panhavorn") return "bg-[#d97706]";
+  if (trimmed === "Meng Fong") return "bg-[#2563eb]";
+  if (trimmed === "Mengchheang") return "bg-[#ef4444]";
+  if (trimmed === "John Smith") return "bg-[#059669]";
+  if (trimmed === "Jane Doe") return "bg-[#1e293b]";
+
+  const colors = [
+    "bg-amber-600",
+    "bg-blue-600",
+    "bg-emerald-600",
+    "bg-indigo-600",
+    "bg-violet-600",
+    "bg-rose-600",
+    "bg-slate-700",
+    "bg-teal-600",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function getProjectBadgeStyle(projectName?: string | null) {
+  if (!projectName) {
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+  const lower = projectName.toLowerCase();
+  if (lower.includes("ai project") || lower.includes("workspace")) {
+    return "bg-[#eff6ff] text-[#2563eb] border-[#bfdbfe]";
+  }
+  if (lower.includes("onboarding") || lower.includes("revamp") || lower.includes("client")) {
+    return "bg-[#fff7ed] text-[#ea580c] border-[#fed7aa]";
+  }
+  if (lower.includes("style") || lower.includes("guide") || lower.includes("internal")) {
+    return "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]";
+  }
+  return "bg-purple-50 text-purple-700 border-purple-200";
+}
 
 export default function TasksPage() {
-  const { currentProject } = useAuth();
+  const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [requirements, setRequirements] = useState<any[]>([]);
+
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [viewMode, setViewMode] = useState<"board" | "list">("board");
 
   // Filters
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("ALL");
+  const [selectedAssignee, setSelectedAssignee] = useState<string>("ALL");
+  const [selectedPriority, setSelectedPriority] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState("ALL");
-  const [priorityFilter, setPriorityFilter] = useState("ALL");
 
-  // Form state
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("MEDIUM");
-  const [dueDate, setDueDate] = useState("");
-  const [requirementId, setRequirementId] = useState("");
-  const [sourceMeetingId, setSourceMeetingId] = useState("");
-  const [inspectingReq, setInspectingReq] = useState<any | null>(null);
+  // Column Progressive Disclosure (limit to 4 initially)
+  const [expandedColumns, setExpandedColumns] = useState<Record<string, boolean>>({
+    TODO: false,
+    IN_PROGRESS: false,
+    DONE: false,
+    BLOCKED: false,
+  });
+
+  // Modals
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createInitialStatus, setCreateInitialStatus] = useState<"TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED">("TODO");
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+
+  // Create Form State
+  const [createProjectId, setCreateProjectId] = useState("");
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createStatus, setCreateStatus] = useState<"TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED">("TODO");
+  const [createPriority, setCreatePriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("MEDIUM");
+  const [createDueDate, setCreateDueDate] = useState("");
+  const [createAssigneeId, setCreateAssigneeId] = useState("");
+  const [createBlockedReason, setCreateBlockedReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Edit Form State
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editStatus, setEditStatus] = useState<"TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED" | "IN_REVIEW" | "CANCELLED">("TODO");
+  const [editPriority, setEditPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("MEDIUM");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editAssigneeId, setEditAssigneeId] = useState("");
+  const [editBlockedReason, setEditBlockedReason] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  const loadData = async () => {
-    if (!currentProject) return;
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tasksData, reqsData] = await Promise.all([
-        api.tasks.list(currentProject.id),
-        api.requirements.list(currentProject.id).catch(() => []),
-      ]);
-      setTasks(tasksData || []);
-      setRequirements(reqsData || []);
+      const res = await api.tasks.listAll({ pageSize: 100 });
+      setTasks(res.data || []);
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Failed to load tasks", "error");
+      if (currentProject) {
+        try {
+          const fallbackTasks = await api.tasks.list(currentProject.id);
+          setTasks(fallbackTasks || []);
+        } catch (innerErr: any) {
+          showToast(innerErr.message || "Failed to load tasks", "error");
+        }
+      } else {
+        showToast(err.message || "Failed to load tasks", "error");
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentProject, showToast]);
 
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Read URL params if any
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("create") === "true") {
-        setShowCreate(true);
+        setCreateModalOpen(true);
       }
       const q = params.get("search");
       if (q) {
         setSearchQuery(q);
       }
-      const rId = params.get("reqId");
-      if (rId) {
-        setRequirementId(rId);
-        setShowCreate(true);
-      }
-      const mId = params.get("meetingId") || params.get("sourceMeetingId");
-      if (mId) {
-        setSourceMeetingId(mId);
-        setShowCreate(true);
-      }
-      const tTitle = params.get("title");
-      if (tTitle) {
-        setTitle(tTitle);
-      }
-      const p = params.get("priority");
-      if (p && ["LOW", "MEDIUM", "HIGH", "URGENT"].includes(p)) {
-        setPriority(p as any);
+    }
+  }, []);
+
+  // Compute unique assignees from tasks & project members
+  const assigneesList = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const t of tasks) {
+      if (t.assignee) {
+        map.set(t.assignee.id, { id: t.assignee.id, name: t.assignee.displayName });
       }
     }
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject]);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tasks]);
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    showToast(`Copied ${label} to clipboard!`, "info");
+  // Compute unique active projects
+  const activeProjectsList = useMemo(() => {
+    const map = new Map<string, ProjectInfo>();
+    for (const p of projects) {
+      map.set(p.id, { id: p.id, name: p.name, key: p.key });
+    }
+    for (const t of tasks) {
+      if (t.project) {
+        map.set(t.project.id, t.project);
+      }
+    }
+    return Array.from(map.values());
+  }, [projects, tasks]);
+
+  const isTaskOverdue = useCallback(
+    (task: TaskItem) => {
+      if (!task.dueDate) return false;
+      if (task.status === "DONE" || task.status === "CANCELLED") return false;
+      return task.dueDate < todayStr;
+    },
+    [todayStr]
+  );
+
+  // Filter tasks based on controls
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      // Project filter
+      if (selectedProjectId !== "ALL" && t.projectId !== selectedProjectId) {
+        return false;
+      }
+      // Assignee filter
+      if (selectedAssignee !== "ALL") {
+        if (!t.assignee && selectedAssignee !== "UNASSIGNED") return false;
+        if (t.assignee && t.assignee.displayName !== selectedAssignee && t.assignee.id !== selectedAssignee) {
+          return false;
+        }
+      }
+      // Priority filter
+      if (selectedPriority !== "ALL") {
+        if (selectedPriority === "HIGH" && t.priority !== "HIGH" && t.priority !== "URGENT") return false;
+        if (selectedPriority === "MEDIUM" && t.priority !== "MEDIUM") return false;
+        if (selectedPriority === "LOW" && t.priority !== "LOW") return false;
+      }
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchTitle = t.title.toLowerCase().includes(q);
+        const matchProject = t.project?.name.toLowerCase().includes(q);
+        const matchAssignee = t.assignee?.displayName.toLowerCase().includes(q);
+        const matchReason = t.blockedReason?.toLowerCase().includes(q);
+        const matchKey = t.displayKey?.toLowerCase().includes(q);
+        if (!matchTitle && !matchProject && !matchAssignee && !matchReason && !matchKey) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [tasks, selectedProjectId, selectedAssignee, selectedPriority, searchQuery]);
+
+  // Active projects count in filtered result
+  const filteredProjectsCount = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of filteredTasks) {
+      set.add(t.projectId);
+    }
+    return set.size || (activeProjectsList.length > 0 ? activeProjectsList.length : 1);
+  }, [filteredTasks, activeProjectsList]);
+
+  // Tasks partitioned by status
+  const tasksByStatus = useMemo(() => {
+    const map: Record<string, TaskItem[]> = {
+      TODO: [],
+      IN_PROGRESS: [],
+      DONE: [],
+      BLOCKED: [],
+    };
+    for (const t of filteredTasks) {
+      let st: string = t.status;
+      if (st === "IN_REVIEW") st = "IN_PROGRESS";
+      if (st === "CANCELLED") st = "DONE";
+      if (!map[st]) {
+        map[st] = [];
+      }
+      map[st].push(t);
+    }
+    return map;
+  }, [filteredTasks]);
+
+  const listSortedTasks = useMemo(() => {
+    const statusPriority: Record<string, number> = {
+      IN_PROGRESS: 1,
+      IN_REVIEW: 1,
+      TODO: 2,
+      BLOCKED: 3,
+      DONE: 4,
+      CANCELLED: 5,
+    };
+    return [...filteredTasks].sort((a, b) => {
+      const pA = statusPriority[a.status] || 99;
+      const pB = statusPriority[b.status] || 99;
+      if (pA !== pB) return pA - pB;
+      return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+    });
+  }, [filteredTasks]);
+
+  const toggleColumnExpand = (status: string) => {
+    setExpandedColumns((prev) => ({
+      ...prev,
+      [status]: !prev[status],
+    }));
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openCreateModal = (initialStatus: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED" = "TODO") => {
+    setCreateInitialStatus(initialStatus);
+    setCreateStatus(initialStatus);
+    setCreateProjectId(
+      selectedProjectId !== "ALL"
+        ? selectedProjectId
+        : currentProject?.id || (activeProjectsList[0]?.id ?? "")
+    );
+    setCreateTitle("");
+    setCreateDescription("");
+    setCreatePriority("MEDIUM");
+    setCreateDueDate("");
+    setCreateAssigneeId("");
+    setCreateBlockedReason(
+      initialStatus === "BLOCKED" ? "Waiting on Phase 2 scope decision" : ""
+    );
+    setCreateModalOpen(true);
+  };
+
+  const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentProject || !title.trim()) return;
+    if (!createProjectId || !createTitle.trim()) {
+      showToast("Please provide a project and task title", "error");
+      return;
+    }
     setSubmitting(true);
-    setErrorMsg(null);
     try {
-      const created = await api.tasks.create(currentProject.id, {
-        title: title.trim(),
-        description: description.trim() || undefined,
-        priority,
-        dueDate: dueDate ? dueDate : undefined,
-        requirementId: requirementId ? requirementId : undefined,
-        sourceMeetingId: sourceMeetingId ? sourceMeetingId : undefined,
+      await api.tasks.create(createProjectId, {
+        title: createTitle.trim(),
+        description: createDescription.trim() || undefined,
+        status: createStatus,
+        priority: createPriority,
+        dueDate: createDueDate || undefined,
+        assigneeId: createAssigneeId || undefined,
+        blockedReason: createStatus === "BLOCKED" ? createBlockedReason.trim() : undefined,
       });
-      setTitle("");
-      setDescription("");
-      setDueDate("");
-      setRequirementId("");
-      setSourceMeetingId("");
-      setShowCreate(false);
-      showToast(`Task ${created.displayKey || "item"} created successfully!`, "success");
+      showToast("Task created successfully", "success");
+      setCreateModalOpen(false);
       await loadData();
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to create task");
       showToast(err.message || "Failed to create task", "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const updateStatus = async (task: any, newStatus: string) => {
-    if (!currentProject) return;
+  const openEditModal = (task: TaskItem) => {
+    setEditingTask(task);
+    setEditTitle(task.title);
+    setEditDescription(task.description || "");
+    setEditStatus(task.status);
+    setEditPriority(task.priority);
+    setEditDueDate(task.dueDate || "");
+    setEditAssigneeId(task.assigneeId || "");
+    setEditBlockedReason(task.blockedReason || "");
+  };
+
+  const handleUpdateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTask || !editTitle.trim()) return;
+    setEditSubmitting(true);
     try {
-      await api.tasks.update(currentProject.id, task.id, {
-        version: task.version,
-        status: newStatus,
+      await api.tasks.update(editingTask.projectId, editingTask.id, {
+        version: editingTask.version,
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        status: editStatus,
+        priority: editPriority,
+        dueDate: editDueDate || null,
+        assigneeId: editAssigneeId || null,
+        blockedReason: editStatus === "BLOCKED" ? editBlockedReason.trim() : null,
       });
-      showToast(`${task.displayKey} marked as ${newStatus}`, "success");
+      showToast("Task updated successfully", "success");
+      setEditingTask(null);
       await loadData();
     } catch (err: any) {
-      showToast(err.message || "Failed to update task status", "error");
+      showToast(err.message || "Failed to update task", "error");
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
-  const isTaskOverdue = useCallback((task: any) => {
-    if (!task.dueDate) return false;
-    if (task.status === "DONE" || task.status === "CANCELLED") return false;
-    return task.dueDate < todayStr;
-  }, [todayStr]);
-
-  const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => {
-      const q = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        q === "" ||
-        task.id.toLowerCase() === q ||
-        task.title.toLowerCase().includes(q) ||
-        (task.displayKey && task.displayKey.toLowerCase().includes(q)) ||
-        (task.description && task.description.toLowerCase().includes(q)) ||
-        (task.requirement?.displayKey &&
-          task.requirement.displayKey.toLowerCase().includes(q)) ||
-        (task.requirement?.title &&
-          task.requirement.title.toLowerCase().includes(q));
-
-      let matchesTab = true;
-      if (activeTab === "OVERDUE") {
-        matchesTab = isTaskOverdue(task);
-      } else if (activeTab === "LINKED") {
-        matchesTab = Boolean(task.requirementId || task.requirement);
-      } else if (activeTab !== "ALL") {
-        matchesTab = task.status === activeTab;
-      }
-
-      const matchesPriority =
-        priorityFilter === "ALL" || task.priority === priorityFilter;
-
-      return matchesSearch && matchesTab && matchesPriority;
-    });
-  }, [tasks, searchQuery, activeTab, priorityFilter, isTaskOverdue]);
-
-  const overdueCount = useMemo(() => {
-    return tasks.filter((t) => isTaskOverdue(t)).length;
-  }, [tasks, isTaskOverdue]);
-
-  const linkedReqCount = useMemo(() => {
-    return tasks.filter((t) => Boolean(t.requirementId || t.requirement)).length;
-  }, [tasks]);
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "DONE":
-        return <Badge variant="success" className="text-[10px]">DONE</Badge>;
-      case "IN_PROGRESS":
-        return <Badge className="bg-blue-600/20 text-blue-400 border-blue-500/30 text-[10px]">IN PROGRESS</Badge>;
-      case "IN_REVIEW":
-        return <Badge className="bg-amber-600/20 text-amber-400 border-amber-500/30 text-[10px]">IN REVIEW</Badge>;
-      case "CANCELLED":
-        return <Badge variant="secondary" className="line-through text-zinc-500 text-[10px]">CANCELLED</Badge>;
-      default:
-        return <Badge variant="outline" className="text-zinc-400 text-[10px]">TO DO</Badge>;
+  const handleDeleteTask = async () => {
+    if (!editingTask) return;
+    if (!confirm(`Are you sure you want to delete task "${editingTask.title}"?`)) return;
+    setEditSubmitting(true);
+    try {
+      await api.tasks.delete(editingTask.projectId, editingTask.id);
+      showToast("Task deleted", "success");
+      setEditingTask(null);
+      await loadData();
+    } catch (err: any) {
+      showToast(err.message || "Failed to delete task", "error");
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
-  const getPriorityBadge = (p: string) => {
-    switch (p) {
-      case "URGENT":
-        return <Badge variant="destructive" className="text-[9px]">URGENT</Badge>;
-      case "HIGH":
-        return <Badge className="bg-orange-600/20 text-orange-400 border-orange-500/30 text-[9px]">HIGH</Badge>;
-      case "MEDIUM":
-        return <Badge className="bg-amber-600/20 text-amber-400 border-amber-500/30 text-[9px]">MEDIUM</Badge>;
-      default:
-        return <Badge variant="secondary" className="text-[9px]">LOW</Badge>;
+  const renderPriorityBadge = (priority: string) => {
+    if (priority === "HIGH" || priority === "URGENT") {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444]" />
+          <span>High</span>
+        </span>
+      );
     }
+    if (priority === "MEDIUM") {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
+          <span>Med</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-700">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#10b981]" />
+        <span>Low</span>
+      </span>
+    );
   };
 
-  const selectedReqObj = requirements.find((r) => r.id === requirementId);
+  const renderStatusDot = (status: string) => {
+    if (status === "IN_PROGRESS" || status === "IN_REVIEW") {
+      return <span className="w-2 h-2 rounded-full bg-[#3b82f6] shrink-0" />;
+    }
+    if (status === "DONE" || status === "CANCELLED") {
+      return <span className="w-2 h-2 rounded-full bg-[#10b981] shrink-0" />;
+    }
+    if (status === "BLOCKED") {
+      return <span className="w-2 h-2 rounded-full bg-[#ef4444] shrink-0" />;
+    }
+    return <span className="w-2 h-2 rounded-full bg-[#94a3b8] shrink-0" />;
+  };
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-6xl mx-auto pb-10">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-codex-border pb-4">
+      <div className="space-y-5 max-w-7xl mx-auto pb-12">
+        {/* Top Breadcrumb & Title Area */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center border border-blue-100">
-                <CheckSquare className="w-4 h-4" />
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-codex-text font-serif">
-                Tasks
-              </h1>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+              <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
+                Dashboard
+              </Link>
+              <span>/</span>
+              <span className="text-slate-800 font-medium">Tasks</span>
             </div>
-            <p className="text-xs text-codex-muted mt-1">
-              Actionable engineering items with due dates, priorities, optimistic locking, and requirement traceability.
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
+              Tasks
+            </h1>
+            <p className="text-xs text-slate-500 mt-1">
+              {filteredTasks.length} tasks across {filteredProjectsCount} active {filteredProjectsCount === 1 ? "project" : "projects"}.
             </p>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <Link href="/requirements">
-              <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5">
-                <FileCheck2 className="w-3.5 h-3.5 text-codex-accent" />
-                <span>Requirements</span>
-              </Button>
-            </Link>
-            <Button
-              size="sm"
-              onClick={() => setShowCreate(!showCreate)}
-              className="gap-1.5 text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-sm h-9"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{showCreate ? "Close Form" : "Create Task"}</span>
-            </Button>
-          </div>
+
+          <Button
+            onClick={() => openCreateModal("TODO")}
+            className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm flex items-center gap-1.5 self-start sm:self-auto h-9"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>New Task</span>
+          </Button>
         </div>
 
-        {/* Create Task Card */}
-        {showCreate && (
-          <Card className="border-codex-accent/30 shadow-xl animate-in fade-in slide-in-from-top-2">
-            <CardHeader className="pb-3 border-b border-codex-border">
-              <CardTitle className="text-sm font-bold text-codex-text flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-codex-accent" />
-                  <span>Create New Actionable Task</span>
-                </div>
-                {selectedReqObj && (
-                  <Badge className="bg-blue-50 text-codex-accent border-blue-100 text-[10px] font-mono">
-                    Linked to {selectedReqObj.displayKey}
-                  </Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <form onSubmit={handleCreate}>
-              <div className="p-5 space-y-4">
-                {errorMsg && (
-                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Task Title *</label>
-                  <Input
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g., Implement Session Cookie CSRF Interceptor"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Priority</label>
-                    <select
-                      value={priority}
-                      onChange={(e) => setPriority(e.target.value as any)}
-                      className="w-full h-9 rounded-lg border border-codex-border bg-white px-3 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-                    >
-                      <option value="LOW">Low</option>
-                      <option value="MEDIUM">Medium</option>
-                      <option value="HIGH">High</option>
-                      <option value="URGENT">Urgent</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Due Date</label>
-                    <Input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Link Requirement</label>
-                    <select
-                      value={requirementId}
-                      onChange={(e) => setRequirementId(e.target.value)}
-                      className="w-full h-9 rounded-lg border border-codex-border bg-white px-3 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-                    >
-                      <option value="">No Requirement Link</option>
-                      {requirements.map((req) => (
-                        <option key={req.id} value={req.id}>
-                          [{req.displayKey || "REQ"}] {req.title.substring(0, 32)}...
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Description / Instructions</label>
-                  <textarea
-                    rows={2}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Provide technical implementation notes, target files, or acceptance requirements..."
-                    className="w-full rounded-lg bg-white border border-codex-border p-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent"
-                  />
-                </div>
-              </div>
-
-              <div className="p-4 bg-slate-50 border-t border-codex-border flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowCreate(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={submitting}
-                  className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
-                >
-                  {submitting ? "Saving..." : "Create Task"}
-                </Button>
-              </div>
-            </form>
-          </Card>
-        )}
-
-        {/* Filter Tabs & Search Bar */}
-        <div className="space-y-3">
-          {/* Status Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-codex-border pb-2 text-xs">
-            <button
-              onClick={() => setActiveTab("ALL")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "ALL"
-                  ? "bg-slate-200 text-codex-text font-semibold"
-                  : "text-slate-500 hover:text-codex-text"
-              }`}
-            >
-              All ({tasks.length})
-            </button>
-            <button
-              onClick={() => setActiveTab("TODO")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "TODO"
-                  ? "bg-slate-200 text-codex-text font-semibold"
-                  : "text-slate-500 hover:text-codex-text"
-              }`}
-            >
-              To Do ({tasks.filter((t) => t.status === "TODO").length})
-            </button>
-            <button
-              onClick={() => setActiveTab("IN_PROGRESS")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "IN_PROGRESS"
-                  ? "bg-blue-50 text-codex-accent font-semibold border border-blue-200"
-                  : "text-slate-500 hover:text-codex-text"
-              }`}
-            >
-              In Progress ({tasks.filter((t) => t.status === "IN_PROGRESS").length})
-            </button>
-            <button
-              onClick={() => setActiveTab("IN_REVIEW")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "IN_REVIEW"
-                  ? "bg-amber-50 text-[#D97706] font-semibold border border-amber-200"
-                  : "text-slate-500 hover:text-codex-text"
-              }`}
-            >
-              In Review ({tasks.filter((t) => t.status === "IN_REVIEW").length})
-            </button>
-            <button
-              onClick={() => setActiveTab("DONE")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                activeTab === "DONE"
-                  ? "bg-emerald-50 text-[#2D8A60] font-semibold border border-emerald-200"
-                  : "text-slate-500 hover:text-codex-text"
-              }`}
-            >
-              Done ({tasks.filter((t) => t.status === "DONE").length})
-            </button>
-            {linkedReqCount > 0 && (
-              <button
-                onClick={() => setActiveTab("LINKED")}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
-                  activeTab === "LINKED"
-                    ? "bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30"
-                    : "text-indigo-400 hover:bg-indigo-500/10"
-                }`}
+        {/* Filter Toolbar & View Switcher */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
+          {/* Left: Dropdown Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Project Dropdown */}
+            <div className="relative">
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
               >
-                <LinkIcon className="w-3 h-3" />
-                <span>Linked REQ ({linkedReqCount})</span>
-              </button>
-            )}
-            {overdueCount > 0 && (
-              <button
-                onClick={() => setActiveTab("OVERDUE")}
-                className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
-                  activeTab === "OVERDUE"
-                    ? "bg-red-500/20 text-red-300 font-semibold border border-red-500/40"
-                    : "text-red-400 hover:bg-red-500/10"
-                }`}
+                <option value="ALL">Project: All</option>
+                {activeProjectsList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    Project: {p.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
+            </div>
+
+            {/* Assignee Dropdown */}
+            <div className="relative">
+              <select
+                value={selectedAssignee}
+                onChange={(e) => setSelectedAssignee(e.target.value)}
+                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
               >
-                <AlertTriangle className="w-3 h-3" />
-                <span>Overdue ({overdueCount})</span>
-              </button>
-            )}
+                <option value="ALL">Assignee: All</option>
+                {assigneesList.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    Assignee: {a.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
+            </div>
+
+            {/* Priority Dropdown */}
+            <div className="relative">
+              <select
+                value={selectedPriority}
+                onChange={(e) => setSelectedPriority(e.target.value)}
+                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
+              >
+                <option value="ALL">Priority: All</option>
+                <option value="HIGH">Priority: High</option>
+                <option value="MEDIUM">Priority: Med</option>
+                <option value="LOW">Priority: Low</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
+            </div>
           </div>
 
-          {/* Search & Priority Row */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white border border-codex-border p-3 rounded-xl shadow-sm">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
-              <Input
+          {/* Right: Search & View Switcher */}
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex-1 md:w-56">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+              <input
+                type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search tasks by title, key, or requirement..."
-                className="pl-8 h-8 text-xs"
+                placeholder="Filter tasks..."
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500">Priority:</span>
-              <select
-                value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-                className="h-8 rounded-lg border border-codex-border bg-white px-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
+            {/* View Switcher Toggle */}
+            <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs h-9">
+              <button
+                type="button"
+                onClick={() => setViewMode("board")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  viewMode === "board"
+                    ? "bg-[#0f172a] text-white font-semibold shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
               >
-                <option value="ALL">All</option>
-                <option value="URGENT">Urgent</option>
-                <option value="HIGH">High</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="LOW">Low</option>
-              </select>
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Board</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  viewMode === "list"
+                    ? "bg-[#0f172a] text-white font-semibold shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>List</span>
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Tasks List */}
+        {/* Content Area */}
         {loading ? (
-          <div className="space-y-3">
-            <div className="h-20 rounded-xl bg-slate-200 animate-pulse" />
-            <div className="h-20 rounded-xl bg-slate-200 animate-pulse" />
-            <div className="h-20 rounded-xl bg-slate-200 animate-pulse" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+                <div className="h-6 w-24 bg-slate-200 rounded animate-pulse" />
+                <div className="h-28 bg-white rounded-xl animate-pulse" />
+                <div className="h-28 bg-white rounded-xl animate-pulse" />
+              </div>
+            ))}
           </div>
         ) : filteredTasks.length === 0 ? (
-          <div className="text-center py-16 p-6 rounded-2xl border border-dashed border-codex-border bg-white space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center mx-auto">
-              <CheckSquare className="w-5 h-5" />
+          <div className="text-center py-20 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3 shadow-2xs">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
+              <LayoutGrid className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-semibold text-codex-text">
-              {tasks.length === 0 ? "No Tasks in this Workspace Yet" : "No Matching Tasks Found"}
-            </h3>
-            <p className="text-xs text-codex-muted max-w-sm mx-auto">
+            <h3 className="text-sm font-semibold text-slate-900">No matching tasks found</h3>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
               {tasks.length === 0
-                ? "Break down your project requirements into trackable action items with due dates."
-                : "Try clearing your search query or switching to another status tab."}
+                ? "No tasks created yet in this workspace. Create your first task to get started."
+                : "Try adjusting your project, assignee, or priority filters, or clear your search term."}
             </p>
             {tasks.length === 0 ? (
-              <Button size="sm" onClick={() => setShowCreate(true)} className="text-xs bg-codex-accent hover:bg-codex-hover text-white">
+              <Button
+                onClick={() => openCreateModal("TODO")}
+                className="text-xs bg-[#2563eb] hover:bg-[#1d4ed8] text-white mt-2"
+              >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Create First Task
               </Button>
             ) : (
@@ -515,263 +661,620 @@ export default function TasksPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
+                  setSelectedProjectId("ALL");
+                  setSelectedAssignee("ALL");
+                  setSelectedPriority("ALL");
                   setSearchQuery("");
-                  setActiveTab("ALL");
-                  setPriorityFilter("ALL");
                 }}
-                className="text-xs"
+                className="text-xs mt-2"
               >
                 Reset Filters
               </Button>
             )}
           </div>
-        ) : (
-          <div className="space-y-3">
-            {filteredTasks.map((task) => {
-              const overdue = isTaskOverdue(task);
-              const isSearchMatch =
-                searchQuery.trim() !== "" &&
-                (task.displayKey?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  task.title?.toLowerCase().includes(searchQuery.toLowerCase()));
+        ) : viewMode === "board" ? (
+          /* Kanban Board View */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start pt-1">
+            {COLUMNS.map((col) => {
+              const colTasks = tasksByStatus[col.status] || [];
+              const isExpanded = expandedColumns[col.status] || false;
+              const displayedTasks = isExpanded ? colTasks : colTasks.slice(0, 4);
+              const remainingCount = colTasks.length - 4;
 
               return (
-                <Card
-                  key={task.id}
-                  className={`bg-white border-codex-border hover:border-codex-accent/40 transition-all shadow-sm ${
-                    overdue
-                      ? "border-red-300 bg-red-50/20"
-                      : isSearchMatch
-                      ? "ring-1 ring-codex-accent border-codex-accent"
-                      : ""
-                  }`}
+                <div
+                  key={col.status}
+                  className="bg-[#f8fafc]/90 border border-slate-200/80 rounded-2xl p-3 flex flex-col space-y-3 shadow-2xs"
                 >
-                  <CardHeader className="p-4 pb-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          onClick={() => copyToClipboard(task.displayKey || task.id, "task key")}
-                          className="flex items-center gap-1 font-mono text-xs font-bold text-codex-accent bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-100 transition-all group"
-                          title="Click to copy key"
-                        >
-                          <span>{task.displayKey || task.id.substring(0, 8)}</span>
-                          <Copy className="w-3 h-3 text-codex-accent/60 group-hover:text-codex-accent" />
-                        </button>
-                        {getPriorityBadge(task.priority)}
-                        {getStatusBadge(task.status)}
-                        {overdue && (
-                          <Badge variant="destructive" className="text-[9px] gap-1 animate-pulse">
-                            <AlertTriangle className="w-3 h-3" /> Overdue
-                          </Badge>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-mono">Rev: v{task.version}</span>
-                      </div>
-
-                      {/* Status changer & Quick Actions */}
-                      <div className="flex items-center gap-2 self-start sm:self-auto">
-                        {task.status === "TODO" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => updateStatus(task, "IN_PROGRESS")}
-                            className="h-7 text-[11px] px-2.5 border-blue-200 text-codex-accent hover:bg-blue-50 gap-1"
-                          >
-                            Start Task <ArrowRight className="w-3 h-3" />
-                          </Button>
-                        )}
-                        {task.status === "IN_PROGRESS" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => updateStatus(task, "DONE")}
-                            className="h-7 text-[11px] px-2.5 border-emerald-200 text-[#2D8A60] hover:bg-emerald-50 gap-1"
-                          >
-                            Mark Done <CheckCircle2 className="w-3 h-3" />
-                          </Button>
-                        )}
-
-                        <select
-                          value={task.status}
-                          onChange={(e) => updateStatus(task, e.target.value)}
-                          className="text-xs bg-slate-50 border border-codex-border rounded-lg px-2 py-1 text-codex-text focus:outline-none focus:ring-1 focus:ring-codex-accent cursor-pointer"
-                        >
-                          <option value="TODO">TO DO</option>
-                          <option value="IN_PROGRESS">IN PROGRESS</option>
-                          <option value="IN_REVIEW">IN REVIEW</option>
-                          <option value="DONE">DONE</option>
-                          <option value="CANCELLED">CANCELLED</option>
-                        </select>
-                      </div>
+                  {/* Column Header */}
+                  <div className="flex items-center justify-between px-1 pt-1 pb-0.5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: col.dotColor }}
+                      />
+                      <span className="text-[12px] font-bold text-slate-800 tracking-wider">
+                        {col.label}
+                      </span>
                     </div>
+                    <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 bg-white border border-slate-200 rounded-full font-mono shadow-2xs">
+                      {colTasks.length}
+                    </span>
+                  </div>
 
-                    <CardTitle className="text-sm font-semibold text-codex-text pt-2 leading-snug">
-                      {task.title}
-                    </CardTitle>
-                  </CardHeader>
+                  {/* Task Cards Container */}
+                  <div className="space-y-2.5">
+                    {displayedTasks.map((task) => {
+                      const overdue = isTaskOverdue(task);
+                      const isBlocked = task.status === "BLOCKED";
+                      const isDone = task.status === "DONE" || task.status === "CANCELLED";
+                      const projectName = task.project?.name || "Workspace";
+                      const assigneeName = task.assignee?.displayName || "Unassigned";
 
-                  <CardContent className="p-4 pt-1 space-y-2.5">
-                    {task.description && (
-                      <p className="text-xs text-codex-muted leading-relaxed">
-                        {task.description}
-                      </p>
-                    )}
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-codex-border text-[11px] text-slate-500">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {task.dueDate ? (
-                          <span className={`flex items-center gap-1 font-mono ${overdue ? "text-codex-warning font-semibold" : "text-slate-500"}`}>
-                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Due: {task.dueDate}</span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 font-mono">No due date</span>
-                        )}
-
-                        {/* Interactive Clickable Requirement Badge */}
-                        {task.requirement ? (
-                          <div className="flex items-center gap-1.5">
-                            <Link
-                              href={`/requirements?search=${encodeURIComponent(task.requirement.displayKey || task.requirement.id)}`}
-                              className="flex items-center gap-1 text-codex-accent hover:underline font-mono bg-blue-50 px-2 py-0.5 rounded border border-blue-100 transition-all group"
-                              title="Jump to linked requirement"
+                      return (
+                        <div
+                          key={task.id}
+                          onClick={() => openEditModal(task)}
+                          className="group relative bg-white border border-slate-200/90 hover:border-slate-300 rounded-xl p-3.5 shadow-2xs hover:shadow-xs transition-all cursor-pointer space-y-2.5"
+                        >
+                          {/* Top Row: Project Pill + Priority */}
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[190px] ${getProjectBadgeStyle(
+                                projectName
+                              )}`}
                             >
-                              <LinkIcon className="w-3 h-3 text-codex-accent/70" />
-                              <span className="font-semibold">{task.requirement.displayKey || "Linked REQ"}</span>
-                              <span className="text-slate-500 text-[10px] hidden md:inline">
-                                ({task.requirement.title.substring(0, 20)}...)
-                              </span>
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => setInspectingReq(task.requirement)}
-                              className="text-[10px] text-codex-accent hover:underline font-mono"
-                              title="View acceptance criteria & specs without leaving this page"
-                            >
-                              Spec
-                            </button>
+                              {projectName}
+                            </span>
+                            {renderPriorityBadge(task.priority)}
                           </div>
-                        ) : (
-                          <span className="text-slate-400 font-mono text-[10px]">Unlinked</span>
-                        )}
 
-                        {/* Source Meeting Badge */}
-                        {task.sourceMeetingId && (
-                          <Link
-                            href={`/meetings?search=${encodeURIComponent(task.sourceMeetingId)}`}
-                            className="flex items-center gap-1 text-codex-accent font-mono text-[10px] bg-blue-50 px-2 py-0.5 rounded border border-blue-100 transition-all"
-                            title="Follow-up from team meeting"
-                          >
-                            <Calendar className="w-3 h-3 text-codex-accent" />
-                            <span>Meeting Item</span>
-                          </Link>
-                        )}
-                      </div>
+                          {/* Task Title */}
+                          <h4 className="text-[12.5px] font-semibold text-slate-800 leading-snug group-hover:text-blue-600 transition-colors">
+                            {task.title}
+                          </h4>
 
-                      {/* Right side: AI Copilot Link and Timestamp */}
-                      <div className="flex items-center gap-3">
-                        <Link
-                          href={`/assistant?prompt=${encodeURIComponent(`How should I implement task [${task.displayKey}]: "${task.title}"? Provide architectural advice and step-by-step code guidance.`)}&mode=DEVELOPER`}
-                          className="text-slate-500 hover:text-codex-accent flex items-center gap-1 font-medium transition-colors"
-                          title="Ask Copilot for developer implementation guidance"
-                        >
-                          <Bot className="w-3.5 h-3.5 text-codex-accent" />
-                          <span className="hidden sm:inline">Ask Copilot</span>
-                        </Link>
-                        <span className="text-slate-400 font-mono">
-                          Created {formatDate(task.createdAt)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                          {/* Blocked Alert Banner if Blocked */}
+                          {(isBlocked || task.blockedReason) && (
+                            <div className="bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] rounded-md px-2 py-1 text-[11px] flex items-center gap-1.5 font-normal">
+                              <AlertCircle className="w-3 h-3 shrink-0" />
+                              <span className="truncate">
+                                {task.blockedReason || "Waiting on Phase 2 scope decision"}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Bottom Row: Due Date / Completed status + Assignee Avatar */}
+                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                            {/* Left: Due Date or Completed */}
+                            <div className="flex items-center gap-1 text-[11px]">
+                              {isDone ? (
+                                <span className="flex items-center gap-1 text-slate-500 font-medium">
+                                  <Check className="w-3.5 h-3.5 text-slate-400 stroke-[2.5]" />
+                                  <span>Completed</span>
+                                </span>
+                              ) : task.dueDate ? (
+                                <span
+                                  className={`flex items-center gap-1 font-medium ${
+                                    overdue ? "text-[#dc2626]" : "text-slate-500"
+                                  }`}
+                                >
+                                  <Calendar
+                                    className={`w-3.5 h-3.5 ${
+                                      overdue ? "text-[#dc2626]" : "text-slate-400"
+                                    }`}
+                                  />
+                                  <span>{formatDueDate(task.dueDate)}</span>
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-slate-400">
+                                  <Calendar className="w-3.5 h-3.5 text-slate-300" />
+                                  <span>-</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Right: Assignee Avatar with Initials */}
+                            <div
+                              className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-2xs ${getAssigneeColor(
+                                assigneeName
+                              )}`}
+                              title={assigneeName}
+                            >
+                              {getInitials(assigneeName)}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Progressive Disclosure Expand Button */}
+                  {colTasks.length > 4 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleColumnExpand(col.status)}
+                      className="w-full py-2 text-center text-xs font-medium text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-2xs"
+                    >
+                      {isExpanded ? "Show less" : `+ ${remainingCount} more`}
+                    </button>
+                  )}
+
+                  {/* Add Task Button at Column Bottom */}
+                  <button
+                    type="button"
+                    onClick={() => openCreateModal(col.status)}
+                    className="w-full py-1.5 flex items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add task</span>
+                  </button>
+                </div>
               );
             })}
           </div>
-        )}
+        ) : (
+          /* List View */
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs pt-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3 px-4 w-[36%]">Task</th>
+                    <th className="py-3 px-4 w-[18%]">Project</th>
+                    <th className="py-3 px-4 w-[15%]">Assignee</th>
+                    <th className="py-3 px-4 w-[10%]">Priority</th>
+                    <th className="py-3 px-4 w-[21%]">Due</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {listSortedTasks.map((task) => {
+                    const isDone = task.status === "DONE" || task.status === "CANCELLED";
+                    const isBlocked = task.status === "BLOCKED";
+                    const overdue = isTaskOverdue(task);
+                    const projectName = task.project?.name || "Workspace";
+                    const assigneeName = task.assignee?.displayName || "Unassigned";
 
-        {/* Next in Workflow Guide Banner */}
-        <div className="p-4 rounded-xl bg-white border border-codex-border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-sm">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-codex-accent shrink-0" />
-            <span className="text-slate-600">
-              Next in workflow: Coordinate with the team in <strong className="text-codex-accent">Meetings</strong> or verify deliverables against specs in <strong className="text-amber-700">Documents</strong>.
-            </span>
+                    return (
+                      <tr
+                        key={task.id}
+                        onClick={() => openEditModal(task)}
+                        className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                      >
+                        {/* Task Column */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2.5">
+                            {renderStatusDot(task.status)}
+                            <span
+                              className={`truncate font-medium ${
+                                isDone
+                                  ? "line-through text-slate-400 font-normal"
+                                  : "text-slate-800 group-hover:text-blue-600 transition-colors"
+                              }`}
+                            >
+                              {task.title}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Project Column */}
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border truncate max-w-[210px] ${getProjectBadgeStyle(
+                              projectName
+                            )}`}
+                          >
+                            {projectName}
+                          </span>
+                        </td>
+
+                        {/* Assignee Column */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0 shadow-2xs ${getAssigneeColor(
+                                assigneeName
+                              )}`}
+                            >
+                              {getInitials(assigneeName)}
+                            </div>
+                            <span className="truncate text-slate-700 text-xs font-medium">
+                              {assigneeName}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Priority Column */}
+                        <td className="py-3 px-4">{renderPriorityBadge(task.priority)}</td>
+
+                        {/* Due Column */}
+                        <td className="py-3 px-4">
+                          {isBlocked ? (
+                            <span className="text-[11px] text-slate-500 font-normal block" title={task.blockedReason || "Waiting on Phase 2 scope decision"}>
+                              {task.blockedReason || "Waiting on Phase 2 scope decision"}
+                            </span>
+                          ) : isDone ? (
+                            <span className="text-[11px] text-slate-400 font-normal">Completed</span>
+                          ) : task.dueDate ? (
+                            <span
+                              className={`text-[11px] font-medium font-mono ${
+                                overdue ? "text-[#dc2626] font-semibold" : "text-slate-600"
+                              }`}
+                            >
+                              {formatDueDate(task.dueDate)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Link href="/meetings">
-              <Button size="sm" variant="outline" className="h-8 text-xs">
-                Go to Meetings →
-              </Button>
-            </Link>
-            <Link href="/documents">
-              <Button size="sm" className="h-8 text-xs bg-codex-accent hover:bg-codex-hover text-white">
-                Go to Documents →
-              </Button>
-            </Link>
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Quick REQ Spec & Acceptance Criteria Modal */}
-      {inspectingReq && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+      {/* CREATE TASK MODAL */}
+      {createModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
           <div
             className="fixed inset-0"
-            onClick={() => setInspectingReq(null)}
+            onClick={() => !submitting && setCreateModalOpen(false)}
           />
-          <div className="relative w-full max-w-lg bg-white border border-codex-border rounded-2xl shadow-2xl p-6 space-y-4 z-10 animate-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-codex-border pb-3">
+          <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-xs font-bold text-codex-accent bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                  {inspectingReq.displayKey || "REQ"}
-                </span>
-                <h3 className="text-sm font-bold text-codex-text truncate max-w-xs">
-                  {inspectingReq.title}
-                </h3>
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Create New Task</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Add a work item to track engineering progress
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setInspectingReq(null)}
-                className="text-slate-400 hover:text-codex-text p-1 rounded"
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {inspectingReq.description && (
-              <div className="space-y-1">
-                <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Description</div>
-                <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-codex-border">
-                  {inspectingReq.description}
-                </p>
-              </div>
-            )}
+            <form onSubmit={handleCreateTask}>
+              <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                {/* Project Selector */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Project *</label>
+                  <select
+                    required
+                    value={createProjectId}
+                    onChange={(e) => setCreateProjectId(e.target.value)}
+                    className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    {activeProjectsList.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.key})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="space-y-1">
-              <div className="text-[11px] font-semibold text-[#2D8A60] uppercase tracking-wider flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-[#2D8A60]" />
-                <span>Acceptance Criteria</span>
+                {/* Title */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Task Title *</label>
+                  <Input
+                    required
+                    value={createTitle}
+                    onChange={(e) => setCreateTitle(e.target.value)}
+                    placeholder="e.g. Set up in-app notification service"
+                    className="h-9 text-xs"
+                  />
+                </div>
+
+                {/* Status & Priority */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Status</label>
+                    <select
+                      value={createStatus}
+                      onChange={(e) => setCreateStatus(e.target.value as any)}
+                      className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="TODO">TO DO</option>
+                      <option value="IN_PROGRESS">IN PROGRESS</option>
+                      <option value="DONE">DONE</option>
+                      <option value="BLOCKED">BLOCKED</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Priority</label>
+                    <select
+                      value={createPriority}
+                      onChange={(e) => setCreatePriority(e.target.value as any)}
+                      className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="HIGH">High</option>
+                      <option value="MEDIUM">Med</option>
+                      <option value="LOW">Low</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Blocked Reason (if BLOCKED) */}
+                {createStatus === "BLOCKED" && (
+                  <div className="space-y-1 p-3 bg-red-50 border border-red-200 rounded-lg animate-in fade-in">
+                    <label className="text-xs font-semibold text-red-700 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Blocked Reason *</span>
+                    </label>
+                    <Input
+                      required
+                      value={createBlockedReason}
+                      onChange={(e) => setCreateBlockedReason(e.target.value)}
+                      placeholder="e.g. Waiting on Phase 2 scope decision"
+                      className="h-8 text-xs bg-white border-red-300 focus:ring-red-500"
+                    />
+                  </div>
+                )}
+
+                {/* Due Date & Assignee */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Due Date</label>
+                    <Input
+                      type="date"
+                      value={createDueDate}
+                      onChange={(e) => setCreateDueDate(e.target.value)}
+                      className="h-9 text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Assignee</label>
+                    <select
+                      value={createAssigneeId}
+                      onChange={(e) => setCreateAssigneeId(e.target.value)}
+                      className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="">Unassigned</option>
+                      {assigneesList.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Description</label>
+                  <textarea
+                    rows={3}
+                    value={createDescription}
+                    onChange={(e) => setCreateDescription(e.target.value)}
+                    placeholder="Implementation guidelines, scope boundaries..."
+                    className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               </div>
-              <div className="text-xs text-slate-800 whitespace-pre-wrap font-mono bg-slate-50 p-3 rounded-lg border border-codex-border max-h-56 overflow-y-auto leading-relaxed">
-                {inspectingReq.acceptanceCriteria || "No acceptance criteria specified for this requirement."}
+
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCreateModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={submitting}
+                  className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                >
+                  {submitting ? "Creating..." : "Create Task"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT / DETAILS TASK MODAL */}
+      {editingTask && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div
+            className="fixed inset-0"
+            onClick={() => !editSubmitting && setEditingTask(null)}
+          />
+          <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded">
+                  {editingTask.displayKey || "TASK"}
+                </span>
+                <span className="text-xs text-slate-400">v{editingTask.version}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/assistant?prompt=${encodeURIComponent(
+                    `Help me implement task [${editingTask.displayKey}]: "${editingTask.title}". Provide actionable architecture advice.`
+                  )}&mode=DEVELOPER`}
+                  className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
+                  title="Ask Copilot for guidance"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>Ask Copilot</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setEditingTask(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </div>
 
-            <div className="pt-2 border-t border-codex-border flex items-center justify-between">
-              <Link
-                href={`/requirements?search=${encodeURIComponent(inspectingReq.displayKey || inspectingReq.id)}`}
-                className="text-xs text-codex-accent hover:underline flex items-center gap-1 font-medium"
-              >
-                <span>Open full requirement in Scope</span>
-                <ArrowRight className="w-3 h-3" />
-              </Link>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setInspectingReq(null)}
-                className="text-xs"
-              >
-                Close
-              </Button>
-            </div>
+            <form onSubmit={handleUpdateTask}>
+              <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                {/* Project Badge display */}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500">Project:</span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${getProjectBadgeStyle(
+                      editingTask.project?.name
+                    )}`}
+                  >
+                    {editingTask.project?.name || "Workspace"}
+                  </span>
+                </div>
+
+                {/* Title */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Task Title *</label>
+                  <Input
+                    required
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+
+                {/* Status & Priority */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Status</label>
+                    <select
+                      value={editStatus}
+                      onChange={(e) => setEditStatus(e.target.value as any)}
+                      className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="TODO">TO DO</option>
+                      <option value="IN_PROGRESS">IN PROGRESS</option>
+                      <option value="DONE">DONE</option>
+                      <option value="BLOCKED">BLOCKED</option>
+                      <option value="CANCELLED">CANCELLED</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Priority</label>
+                    <select
+                      value={editPriority}
+                      onChange={(e) => setEditPriority(e.target.value as any)}
+                      className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="HIGH">High</option>
+                      <option value="MEDIUM">Med</option>
+                      <option value="LOW">Low</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Blocked Reason (if BLOCKED) */}
+                {editStatus === "BLOCKED" && (
+                  <div className="space-y-1 p-3 bg-red-50 border border-red-200 rounded-lg animate-in fade-in">
+                    <label className="text-xs font-semibold text-red-700 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Blocked Reason *</span>
+                    </label>
+                    <Input
+                      required
+                      value={editBlockedReason}
+                      onChange={(e) => setEditBlockedReason(e.target.value)}
+                      placeholder="e.g. Waiting on Phase 2 scope decision"
+                      className="h-8 text-xs bg-white border-red-300 focus:ring-red-500"
+                    />
+                  </div>
+                )}
+
+                {/* Due Date & Assignee */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Due Date</label>
+                    <Input
+                      type="date"
+                      value={editDueDate}
+                      onChange={(e) => setEditDueDate(e.target.value)}
+                      className="h-9 text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">Assignee</label>
+                    <select
+                      value={editAssigneeId}
+                      onChange={(e) => setEditAssigneeId(e.target.value)}
+                      className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="">Unassigned</option>
+                      {assigneesList.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Description</label>
+                  <textarea
+                    rows={3}
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    placeholder="Implementation guidelines, scope boundaries..."
+                    className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleDeleteTask}
+                  disabled={editSubmitting}
+                  className="text-xs gap-1.5 h-8 bg-red-600 hover:bg-red-700 text-white"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditingTask(null)}
+                    className="text-xs h-8"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={editSubmitting}
+                    className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4 h-8"
+                  >
+                    {editSubmitting ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
