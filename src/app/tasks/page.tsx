@@ -23,6 +23,7 @@ import {
   Sparkles,
   Link as LinkIcon,
   Bot,
+  GripVertical,
 } from "lucide-react";
 
 interface ProjectInfo {
@@ -164,6 +165,12 @@ export default function TasksPage() {
     DONE: false,
     BLOCKED: false,
   });
+
+  // Drag and Drop State
+  const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -402,7 +409,133 @@ export default function TasksPage() {
     }
   };
 
+  const handleDragStart = (e: React.DragEvent, task: TaskItem) => {
+    setDraggedTask(task);
+    setIsDragging(true);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", task.id);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedTask(null);
+    setDragOverColumn(null);
+    setDragOverIndex(null);
+    setTimeout(() => {
+      setIsDragging(false);
+    }, 150);
+  };
+
+  const handleDragOverColumn = (
+    e: React.DragEvent,
+    status: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED"
+  ) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverColumn !== status) {
+      setDragOverColumn(status);
+    }
+  };
+
+  const handleDragLeaveColumn = (
+    e: React.DragEvent,
+    status: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED"
+  ) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    if (dragOverColumn === status) {
+      setDragOverColumn(null);
+      setDragOverIndex(null);
+    }
+  };
+
+  const handleDragOverCard = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIndex(index);
+  };
+
+  const handleDropOnColumn = async (
+    e: React.DragEvent,
+    targetStatus: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED"
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!draggedTask) return;
+
+    const sourceStatus = draggedTask.status;
+    const taskToMove = draggedTask;
+    const dropIdx = dragOverIndex;
+
+    setDragOverColumn(null);
+    setDragOverIndex(null);
+
+    // If dropped in same column without position change, return
+    if (sourceStatus === targetStatus && dropIdx === null) {
+      return;
+    }
+
+    // Determine new blocked reason
+    let newBlockedReason = taskToMove.blockedReason;
+    if (targetStatus === "BLOCKED" && !newBlockedReason) {
+      newBlockedReason = "Waiting on Phase 2 scope decision";
+    } else if (targetStatus !== "BLOCKED") {
+      newBlockedReason = null;
+    }
+
+    const updatedTask: TaskItem = {
+      ...taskToMove,
+      status: targetStatus,
+      blockedReason: newBlockedReason,
+    };
+
+    // Optimistic update
+    const previousTasks = [...tasks];
+    setTasks((prev) => {
+      const filtered = prev.filter((t) => t.id !== taskToMove.id);
+      if (dropIdx !== null && dropIdx >= 0) {
+        const targetColTasks = filtered.filter((t) => t.status === targetStatus);
+        const otherTasks = filtered.filter((t) => t.status !== targetStatus);
+        targetColTasks.splice(dropIdx, 0, updatedTask);
+        return [...otherTasks, ...targetColTasks];
+      } else {
+        const targetColTasks = filtered.filter((t) => t.status === targetStatus);
+        const otherTasks = filtered.filter((t) => t.status !== targetStatus);
+        return [...otherTasks, updatedTask, ...targetColTasks];
+      }
+    });
+
+    try {
+      const saved = await api.tasks.update(taskToMove.projectId, taskToMove.id, {
+        version: taskToMove.version,
+        status: targetStatus,
+        blockedReason: newBlockedReason,
+      });
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskToMove.id
+            ? { ...t, version: saved.version, updatedAt: saved.updatedAt }
+            : t
+        )
+      );
+
+      const statusLabels: Record<string, string> = {
+        TODO: "TO DO",
+        IN_PROGRESS: "IN PROGRESS",
+        DONE: "DONE",
+        BLOCKED: "BLOCKED",
+      };
+
+      showToast(`Moved to ${statusLabels[targetStatus] || targetStatus}`, "success");
+    } catch (err: any) {
+      console.error("Failed to move task:", err);
+      showToast(err.message || "Failed to move task. Reverting...", "error");
+      setTasks(previousTasks);
+    }
+  };
+
   const openEditModal = (task: TaskItem) => {
+    if (isDragging) return;
     setEditingTask(task);
     setEditTitle(task.title);
     setEditDescription(task.description || "");
@@ -680,11 +813,19 @@ export default function TasksPage() {
               const isExpanded = expandedColumns[col.status] || false;
               const displayedTasks = isExpanded ? colTasks : colTasks.slice(0, 4);
               const remainingCount = colTasks.length - 4;
+              const isColumnActive = dragOverColumn === col.status;
 
               return (
                 <div
                   key={col.status}
-                  className="bg-[#f8fafc]/90 border border-slate-200/80 rounded-2xl p-3 flex flex-col space-y-3 shadow-2xs"
+                  onDragOver={(e) => handleDragOverColumn(e, col.status)}
+                  onDragLeave={(e) => handleDragLeaveColumn(e, col.status)}
+                  onDrop={(e) => handleDropOnColumn(e, col.status)}
+                  className={`rounded-2xl p-3 flex flex-col space-y-3 transition-all min-h-[440px] ${
+                    isColumnActive
+                      ? "bg-blue-50/70 border-2 border-dashed border-blue-400 ring-2 ring-blue-300/40 shadow-sm"
+                      : "bg-[#f8fafc]/90 border border-slate-200/80 shadow-2xs"
+                  }`}
                 >
                   {/* Column Header */}
                   <div className="flex items-center justify-between px-1 pt-1 pb-0.5">
@@ -702,22 +843,43 @@ export default function TasksPage() {
                     </span>
                   </div>
 
+                  {/* Drop Indicator placeholder when dragging into this column */}
+                  {isColumnActive && draggedTask?.status !== col.status && (
+                    <div className="border-2 border-dashed border-blue-400 bg-white/90 rounded-xl p-3 flex items-center justify-center gap-2 text-xs font-semibold text-blue-600 animate-in fade-in h-14 shadow-2xs">
+                      <Plus className="w-4 h-4 stroke-[2.5]" />
+                      <span>Drop in {col.label}</span>
+                    </div>
+                  )}
+
                   {/* Task Cards Container */}
-                  <div className="space-y-2.5">
-                    {displayedTasks.map((task) => {
+                  <div className="space-y-2.5 flex-1">
+                    {displayedTasks.map((task, idx) => {
                       const overdue = isTaskOverdue(task);
                       const isBlocked = task.status === "BLOCKED";
                       const isDone = task.status === "DONE" || task.status === "CANCELLED";
                       const projectName = task.project?.name || "Workspace";
                       const assigneeName = task.assignee?.displayName || "Unassigned";
+                      const isCardBeingDragged = draggedTask?.id === task.id;
 
                       return (
                         <div
                           key={task.id}
-                          onClick={() => openEditModal(task)}
-                          className="group relative bg-white border border-slate-200/90 hover:border-slate-300 rounded-xl p-3.5 shadow-2xs hover:shadow-xs transition-all cursor-pointer space-y-2.5"
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, task)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleDragOverCard(e, idx)}
+                          onClick={() => {
+                            if (!isDragging) {
+                              openEditModal(task);
+                            }
+                          }}
+                          className={`group relative bg-white border rounded-xl p-3.5 shadow-2xs transition-all cursor-grab active:cursor-grabbing space-y-2.5 select-none ${
+                            isCardBeingDragged
+                              ? "opacity-30 scale-[0.97] border-dashed border-2 border-blue-400 shadow-none ring-2 ring-blue-200"
+                              : "border-slate-200/90 hover:border-slate-300 hover:shadow-xs"
+                          }`}
                         >
-                          {/* Top Row: Project Pill + Priority */}
+                          {/* Top Row: Project Pill + Priority + Drag handle */}
                           <div className="flex items-center justify-between gap-2">
                             <span
                               className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[190px] ${getProjectBadgeStyle(
@@ -726,7 +888,10 @@ export default function TasksPage() {
                             >
                               {projectName}
                             </span>
-                            {renderPriorityBadge(task.priority)}
+                            <div className="flex items-center gap-1.5">
+                              {renderPriorityBadge(task.priority)}
+                              <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                            </div>
                           </div>
 
                           {/* Task Title */}
