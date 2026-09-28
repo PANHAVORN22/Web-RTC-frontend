@@ -397,6 +397,24 @@ export const api = {
 
   documents: {
     list: async (projectId: string) => apiRequest<any[]>(`/projects/${projectId}/documents`),
+    listAll: async (params?: {
+      projectId?: string;
+      fileType?: string;
+      createdBy?: string;
+      search?: string;
+      page?: number;
+      pageSize?: number;
+    }) => {
+      const q = new URLSearchParams();
+      if (params?.projectId && params.projectId !== "ALL") q.append("projectId", params.projectId);
+      if (params?.fileType && params.fileType !== "ALL") q.append("fileType", params.fileType);
+      if (params?.createdBy && params.createdBy !== "ALL") q.append("createdBy", params.createdBy);
+      if (params?.search) q.append("search", params.search);
+      if (params?.page) q.append("page", String(params.page));
+      if (params?.pageSize) q.append("pageSize", String(params.pageSize));
+      const qs = q.toString() ? `?${q.toString()}` : "";
+      return apiEnvelopeRequest<any[]>(`/documents${qs}`);
+    },
     upload: async (projectId: string, formData: FormData) =>
       apiRequest<any>(`/projects/${projectId}/documents`, { method: "POST", body: formData }),
     uploadRevision: async (projectId: string, documentId: string, formData: FormData) =>
