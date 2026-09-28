@@ -2,7 +2,10 @@
 const nextConfig = {
   output: "standalone",
   async rewrites() {
-    const backendUrl = process.env.BACKEND_INTERNAL_URL || "http://localhost:3000";
+    const backendUrl =
+      process.env.BACKEND_INTERNAL_URL ||
+      process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, "") ||
+      "http://localhost:3001";
     return [
       {
         source: "/api/v1/:path*",

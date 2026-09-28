@@ -237,7 +237,7 @@ export default function LoginPage() {
           msg.includes("NetworkError") ||
           msg.includes("status 0")
         ) {
-          setError("Unable to connect to backend at http://localhost:3000. Please ensure the backend is running.");
+          setError("Unable to connect to backend. Please ensure the backend server is running.");
         } else {
           setError(msg || "Incorrect email or password. Double-check and try again.");
         }
@@ -300,7 +300,7 @@ export default function LoginPage() {
           msg.includes("NetworkError") ||
           msg.includes("status 0")
         ) {
-          setError("Unable to connect to backend at http://localhost:3000. Please ensure the backend is running.");
+          setError("Unable to connect to backend. Please ensure the backend server is running.");
         } else {
           setError(msg || "Registration failed. Please try again.");
         }
