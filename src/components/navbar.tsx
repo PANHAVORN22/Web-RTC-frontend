@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Search,
-  Bell,
   Plus,
   FolderKanban,
   Menu,
 } from "lucide-react";
 import { QuickCreateModal } from "@/components/quick-create-modal";
+import { NotificationCenter } from "@/components/notification-center";
 
 interface NavbarProps {
   onToggleMobileMenu?: () => void;
@@ -90,15 +90,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
 
-            {/* Notification Bell */}
-            <button
-              type="button"
-              className="relative p-2.5 rounded-xl border border-codex-border bg-white hover:bg-slate-50 text-slate-600 hover:text-codex-text shadow-sm transition-all"
-              aria-label="Notifications"
-            >
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-codex-warning ring-2 ring-white" />
-            </button>
+            {/* Notification Center */}
+            <NotificationCenter />
 
             {/* + New Button */}
             <Button
