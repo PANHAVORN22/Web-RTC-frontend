@@ -301,6 +301,26 @@ export const api = {
       if (status) url += `?status=${encodeURIComponent(status)}`;
       return apiRequest<any[]>(url);
     },
+    listAll: async (params?: {
+      projectId?: string;
+      status?: string;
+      priority?: string;
+      assigneeId?: string;
+      search?: string;
+      page?: number;
+      pageSize?: number;
+    }) => {
+      const q = new URLSearchParams();
+      if (params?.projectId) q.append("projectId", params.projectId);
+      if (params?.status) q.append("status", params.status);
+      if (params?.priority) q.append("priority", params.priority);
+      if (params?.assigneeId) q.append("assigneeId", params.assigneeId);
+      if (params?.search) q.append("search", params.search);
+      if (params?.page) q.append("page", String(params.page));
+      if (params?.pageSize) q.append("pageSize", String(params.pageSize));
+      const qs = q.toString() ? `?${q.toString()}` : "";
+      return apiEnvelopeRequest<any[]>(`/tasks${qs}`);
+    },
     create: async (
       projectId: string,
       data: {
@@ -309,6 +329,7 @@ export const api = {
         status?: string;
         priority?: string;
         assigneeId?: string;
+        blockedReason?: string;
         dueDate?: string; // YYYY-MM-DD
         requirementId?: string;
         sourceMeetingId?: string;
@@ -320,10 +341,11 @@ export const api = {
       data: {
         version: number;
         title?: string;
-        description?: string;
+        description?: string | null;
         status?: string;
         priority?: string;
         assigneeId?: string | null;
+        blockedReason?: string | null;
         dueDate?: string | null;
       }
     ) =>
@@ -331,6 +353,8 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
+    delete: async (projectId: string, taskId: string) =>
+      apiRequestRaw(`/projects/${projectId}/tasks/${taskId}`, { method: "DELETE" }),
   },
 
   meetings: {
