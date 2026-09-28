@@ -1,107 +1,231 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { ProposalReviewDialog } from "@/components/ai/proposal-review-dialog";
 import { api } from "@/lib/api";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Plus,
-  Clock,
-  AlertCircle,
   Search,
-  CheckCircle2,
-  Copy,
   ChevronDown,
-  ChevronUp,
+  X,
   FileCheck2,
-  Filter,
   Sparkles,
   ListTodo,
-  Bot,
-  ArrowRight,
   ExternalLink,
-  GitPullRequest,
   History,
-  X,
+  Copy,
+  CheckCircle2,
+  AlertCircle,
+  Trash2,
+  Check,
 } from "lucide-react";
-import { formatDate, formatDateTime } from "@/lib/utils";
+
+interface ProjectInfo {
+  id: string;
+  name: string;
+  key: string;
+}
+
+interface UserInfo {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+interface RequirementItem {
+  id: string;
+  projectId: string;
+  number: number;
+  displayKey: string;
+  title: string;
+  description?: string | null;
+  acceptanceCriteria?: string | null;
+  status: "DRAFT" | "IN_REVIEW" | "APPROVED" | "IN_PROGRESS" | "DONE" | "ARCHIVED";
+  priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+  version: number;
+  project?: ProjectInfo | null;
+  creator?: UserInfo | null;
+  updater?: UserInfo | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function getInitials(name?: string | null): string {
+  if (!name) return "??";
+  const trimmed = name.trim();
+  if (trimmed === "Panhavorn") return "NP";
+  if (trimmed === "Meng Fong" || trimmed === "Mengfong") return "MF";
+  if (trimmed === "Mengchheang") return "MC";
+  if (trimmed === "John Smith") return "IS";
+  if (trimmed === "Jane Doe") return "JD";
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getAvatarColor(name?: string | null): string {
+  if (!name) return "bg-slate-700";
+  const trimmed = name.trim();
+  if (trimmed === "Panhavorn") return "bg-[#d97706]";
+  if (trimmed === "Meng Fong" || trimmed === "Mengfong") return "bg-[#2563eb]";
+  if (trimmed === "Mengchheang") return "bg-[#ef4444]";
+  if (trimmed === "John Smith") return "bg-[#0f172a]";
+  if (trimmed === "Jane Doe") return "bg-[#059669]";
+
+  const colors = [
+    "bg-amber-600",
+    "bg-blue-600",
+    "bg-emerald-600",
+    "bg-indigo-600",
+    "bg-violet-600",
+    "bg-rose-600",
+    "bg-slate-700",
+    "bg-teal-600",
+  ];
+  let hash = 0;
+  for (let i = 0; i < trimmed.length; i++) {
+    hash = trimmed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function getProjectBadgeStyle(projectName?: string | null) {
+  if (!projectName) {
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+  const lower = projectName.toLowerCase();
+  if (lower.includes("ai project") || lower.includes("workspace")) {
+    return "bg-[#eff6ff] text-[#2563eb] border-[#bfdbfe]";
+  }
+  if (lower.includes("onboarding") || lower.includes("revamp") || lower.includes("client")) {
+    return "bg-[#fff7ed] text-[#ea580c] border-[#fed7aa]";
+  }
+  if (lower.includes("style") || lower.includes("guide") || lower.includes("internal")) {
+    return "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]";
+  }
+  return "bg-purple-50 text-purple-700 border-purple-200";
+}
+
+function getPriorityLabel(priority: string): string {
+  switch (priority) {
+    case "URGENT":
+    case "HIGH":
+      return "Must-have";
+    case "MEDIUM":
+      return "Should-have";
+    case "LOW":
+    default:
+      return "Could-have";
+  }
+}
+
+function getPriorityBadgeStyle(priority: string) {
+  switch (priority) {
+    case "URGENT":
+    case "HIGH":
+      return "bg-[#eff6ff] text-[#2563eb] border-[#bfdbfe]";
+    case "MEDIUM":
+      return "bg-[#fff7ed] text-[#ea580c] border-[#fed7aa]";
+    case "LOW":
+    default:
+      return "bg-[#f8fafc] text-[#64748b] border-[#e2e8f0]";
+  }
+}
+
+function getStatusDotColor(status: string): string {
+  switch (status) {
+    case "APPROVED":
+    case "DONE":
+      return "#10b981"; // green
+    case "IN_REVIEW":
+    case "IN_PROGRESS":
+      return "#f59e0b"; // amber
+    case "DRAFT":
+    default:
+      return "#94a3b8"; // grey
+  }
+}
+
+function formatRelativeTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "-";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffHours < 1) return "Just now";
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 export default function RequirementsPage() {
-  const { currentProject } = useAuth();
+  const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
-  const [items, setItems] = useState<any[]>([]);
+
+  const [items, setItems] = useState<RequirementItem[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState("ALL");
-  const [selectedPriority, setSelectedPriority] = useState("ALL");
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
-  const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("ALL");
+  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
+  const [selectedPriority, setSelectedPriority] = useState<string>("ALL");
 
-  // Form state
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
-  const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("HIGH");
+  // Create Modal state
+  const [showCreate, setShowCreate] = useState(false);
+  const [createProjectId, setCreateProjectId] = useState("");
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createAcceptanceCriteria, setCreateAcceptanceCriteria] = useState("");
+  const [createPriority, setCreatePriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("HIGH");
+  const [createStatus, setCreateStatus] = useState<"DRAFT" | "IN_REVIEW" | "APPROVED">("DRAFT");
   const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Detail / Edit Modal state
+  const [activeReq, setActiveReq] = useState<RequirementItem | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editAcceptanceCriteria, setEditAcceptanceCriteria] = useState("");
+  const [editPriority, setEditPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "URGENT">("HIGH");
+  const [editStatus, setEditStatus] = useState<"DRAFT" | "IN_REVIEW" | "APPROVED" | "IN_PROGRESS" | "DONE" | "ARCHIVED">("DRAFT");
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // AI Proposal state
   const [activeProposal, setActiveProposal] = useState<any>(null);
   const [generatingProposalId, setGeneratingProposalId] = useState<string | null>(null);
 
   // Revisions Modal state
-  const [revisionsModalReq, setRevisionsModalReq] = useState<any | null>(null);
+  const [revisionsModalReq, setRevisionsModalReq] = useState<RequirementItem | null>(null);
   const [revisionsList, setRevisionsList] = useState<any[]>([]);
   const [loadingRevisions, setLoadingRevisions] = useState(false);
 
-  const openRevisions = async (req: any) => {
-    if (!currentProject) return;
-    setRevisionsModalReq(req);
-    setLoadingRevisions(true);
-    try {
-      const revs = await api.requirements.listRevisions(currentProject.id, req.id);
-      setRevisionsList(revs || []);
-    } catch (err: any) {
-      showToast(err.message || "Failed to load requirement revisions", "error");
-    } finally {
-      setLoadingRevisions(false);
-    }
-  };
-
-  const handleGenerateTasks = async (req: any) => {
-    if (!currentProject) return;
-    setGeneratingProposalId(req.id);
-    try {
-      const res = await api.ai.generateTaskProposal(currentProject.id, req.id);
-      setActiveProposal(res.proposal || res);
-      showToast("Generated task proposal! Review before applying.", "info");
-    } catch (err: any) {
-      showToast(err.message || "Failed to generate tasks", "error");
-    } finally {
-      setGeneratingProposalId(null);
-    }
-  };
-
-  const loadData = async () => {
-    if (!currentProject) return;
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [reqsData, tasksData] = await Promise.all([
-        api.requirements.list(currentProject.id),
-        api.tasks.list(currentProject.id).catch(() => []),
+      const [reqsRes, tasksData] = await Promise.all([
+        api.requirements.listAll({ pageSize: 100 }).catch(async () => {
+          if (currentProject) {
+            const list = await api.requirements.list(currentProject.id);
+            return { data: list || [] };
+          }
+          return { data: [] };
+        }),
+        currentProject
+          ? api.tasks.list(currentProject.id).catch(() => [])
+          : api.tasks.listAll({ pageSize: 100 }).then((r) => r.data || []).catch(() => []),
       ]);
-      setItems(reqsData || []);
+      setItems(reqsRes.data || []);
       setTasks(tasksData || []);
     } catch (err: any) {
       console.error(err);
@@ -109,7 +233,7 @@ export default function RequirementsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentProject, showToast]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -123,73 +247,205 @@ export default function RequirementsPage() {
       }
     }
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject]);
+  }, [loadData]);
 
-  const toggleExpand = (id: string) => {
-    setExpandedItems((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
+  // Compute unique active projects
+  const activeProjectsList = useMemo(() => {
+    const map = new Map<string, ProjectInfo>();
+    for (const p of projects) {
+      map.set(p.id, { id: p.id, name: p.name, key: p.key });
+    }
+    for (const item of items) {
+      if (item.project) {
+        map.set(item.project.id, item.project);
+      }
+    }
+    return Array.from(map.values());
+  }, [projects, items]);
 
-  const toggleExpandTasks = (id: string) => {
-    setExpandedTasks((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
+  // Compute counts for top summary pills
+  const statusCounts = useMemo(() => {
+    let draft = 0;
+    let inReview = 0;
+    let approved = 0;
+    for (const r of items) {
+      if (r.status === "DRAFT") draft++;
+      else if (r.status === "IN_REVIEW" || r.status === "IN_PROGRESS") inReview++;
+      else if (r.status === "APPROVED" || r.status === "DONE") approved++;
+    }
+    return {
+      DRAFT: draft,
+      IN_REVIEW: inReview,
+      APPROVED: approved,
+    };
+  }, [items]);
+
+  // Filter items
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Project filter
+      if (selectedProjectId !== "ALL" && item.projectId !== selectedProjectId) {
+        return false;
+      }
+      // Status filter
+      if (selectedStatus !== "ALL") {
+        if (selectedStatus === "DRAFT" && item.status !== "DRAFT") return false;
+        if (selectedStatus === "IN_REVIEW" && item.status !== "IN_REVIEW" && item.status !== "IN_PROGRESS") return false;
+        if (selectedStatus === "APPROVED" && item.status !== "APPROVED" && item.status !== "DONE") return false;
+      }
+      // Priority filter
+      if (selectedPriority !== "ALL") {
+        if (selectedPriority === "HIGH" && item.priority !== "HIGH" && item.priority !== "URGENT") return false;
+        if (selectedPriority === "MEDIUM" && item.priority !== "MEDIUM") return false;
+        if (selectedPriority === "LOW" && item.priority !== "LOW") return false;
+      }
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchTitle = item.title.toLowerCase().includes(q);
+        const matchDesc = item.description?.toLowerCase().includes(q);
+        const matchKey = item.displayKey?.toLowerCase().includes(q);
+        const matchProject = item.project?.name.toLowerCase().includes(q);
+        const matchUpdater = item.updater?.displayName.toLowerCase().includes(q);
+        if (!matchTitle && !matchDesc && !matchKey && !matchProject && !matchUpdater) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [items, selectedProjectId, selectedStatus, selectedPriority, searchQuery]);
+
+  // Unique projects in filtered result
+  const filteredProjectsCount = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of filteredItems) {
+      set.add(item.projectId);
+    }
+    return set.size || (activeProjectsList.length > 0 ? activeProjectsList.length : 1);
+  }, [filteredItems, activeProjectsList]);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     showToast(`Copied ${label} to clipboard!`, "info");
   };
 
+  const openCreateModal = () => {
+    setCreateProjectId(
+      selectedProjectId !== "ALL"
+        ? selectedProjectId
+        : currentProject?.id || activeProjectsList[0]?.id || ""
+    );
+    setCreateTitle("");
+    setCreateDescription("");
+    setCreateAcceptanceCriteria("");
+    setCreatePriority("HIGH");
+    setCreateStatus("DRAFT");
+    setShowCreate(true);
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentProject || !title.trim()) return;
+    if (!createProjectId || !createTitle.trim()) {
+      showToast("Please provide a project and requirement title", "error");
+      return;
+    }
     setSubmitting(true);
-    setErrorMsg(null);
     try {
-      const created = await api.requirements.create(currentProject.id, {
-        title: title.trim(),
-        description: description.trim() || undefined,
-        acceptanceCriteria: acceptanceCriteria.trim() || undefined,
-        priority,
+      const created = await api.requirements.create(createProjectId, {
+        title: createTitle.trim(),
+        description: createDescription.trim() || undefined,
+        acceptanceCriteria: createAcceptanceCriteria.trim() || undefined,
+        priority: createPriority,
       });
-      setTitle("");
-      setDescription("");
-      setAcceptanceCriteria("");
+
+      if (createStatus !== "DRAFT") {
+        await api.requirements.update(createProjectId, created.id, {
+          version: 1,
+          status: createStatus,
+        });
+      }
+
       setShowCreate(false);
-      showToast(`Created ${created.displayKey || "requirement"} successfully!`, "success");
+      showToast("Requirement created successfully", "success");
       await loadData();
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to create requirement");
       showToast(err.message || "Failed to create requirement", "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const updateStatus = async (req: any, newStatus: string) => {
-    if (!currentProject) return;
+  const openDetailModal = (req: RequirementItem) => {
+    setActiveReq(req);
+    setEditTitle(req.title);
+    setEditDescription(req.description || "");
+    setEditAcceptanceCriteria(req.acceptanceCriteria || "");
+    setEditPriority(req.priority);
+    setEditStatus(req.status);
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeReq || !editTitle.trim()) return;
+    setEditSubmitting(true);
     try {
-      await api.requirements.update(currentProject.id, req.id, {
-        version: req.version,
-        status: newStatus,
+      await api.requirements.update(activeReq.projectId, activeReq.id, {
+        version: activeReq.version,
+        title: editTitle.trim(),
+        description: editDescription.trim() || undefined,
+        acceptanceCriteria: editAcceptanceCriteria.trim() || undefined,
+        priority: editPriority,
+        status: editStatus,
       });
-      showToast(`${req.displayKey} updated to ${newStatus}`, "success");
+      showToast("Requirement updated successfully", "success");
+      setActiveReq(null);
       await loadData();
     } catch (err: any) {
-      showToast(err.message || "Failed to update requirement status", "error");
+      showToast(err.message || "Failed to update requirement", "error");
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
-  const updateTaskStatus = async (task: any, newStatus: string) => {
-    if (!currentProject) return;
+  const handleDelete = async () => {
+    if (!activeReq) return;
+    if (!confirm(`Are you sure you want to delete requirement "${activeReq.title}"?`)) return;
+    setEditSubmitting(true);
     try {
-      await api.tasks.update(currentProject.id, task.id, {
-        version: task.version,
-        status: newStatus,
-      });
-      showToast(`Task ${task.displayKey || ""} updated to ${newStatus}`, "success");
+      await api.requirements.delete(activeReq.projectId, activeReq.id);
+      showToast("Requirement deleted", "success");
+      setActiveReq(null);
       await loadData();
     } catch (err: any) {
-      showToast(err.message || "Failed to update task", "error");
+      showToast(err.message || "Failed to delete requirement", "error");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const openRevisions = async (req: RequirementItem) => {
+    setRevisionsModalReq(req);
+    setLoadingRevisions(true);
+    try {
+      const revs = await api.requirements.listRevisions(req.projectId, req.id);
+      setRevisionsList(revs || []);
+    } catch (err: any) {
+      showToast(err.message || "Failed to load revisions", "error");
+    } finally {
+      setLoadingRevisions(false);
+    }
+  };
+
+  const handleGenerateTasks = async (req: RequirementItem) => {
+    setGeneratingProposalId(req.id);
+    try {
+      const res = await api.ai.generateTaskProposal(req.projectId, req.id);
+      setActiveProposal(res.proposal || res);
+      showToast("Generated task proposal! Review before applying.", "info");
+    } catch (err: any) {
+      showToast(err.message || "Failed to generate tasks", "error");
+    } finally {
+      setGeneratingProposalId(null);
     }
   };
 
@@ -202,255 +458,174 @@ export default function RequirementsPage() {
     );
   };
 
-  const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      const q = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        q === "" ||
-        item.id.toLowerCase() === q ||
-        item.title.toLowerCase().includes(q) ||
-        (item.displayKey && item.displayKey.toLowerCase().includes(q)) ||
-        (item.description && item.description.toLowerCase().includes(q));
-
-      const matchesStatus =
-        selectedStatus === "ALL" || item.status === selectedStatus;
-
-      const matchesPriority =
-        selectedPriority === "ALL" || item.priority === selectedPriority;
-
-      return matchesSearch && matchesStatus && matchesPriority;
-    });
-  }, [items, searchQuery, selectedStatus, selectedPriority]);
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "APPROVED":
-        return <Badge variant="success" className="text-[10px]">APPROVED</Badge>;
-      case "IN_PROGRESS":
-        return <Badge className="bg-blue-600/20 text-blue-400 border-blue-500/30 text-[10px]">IN PROGRESS</Badge>;
-      case "DONE":
-        return <Badge className="bg-emerald-600/20 text-emerald-400 border-emerald-500/30 text-[10px]">DONE</Badge>;
-      case "ARCHIVED":
-        return <Badge variant="secondary" className="text-zinc-500 text-[10px]">ARCHIVED</Badge>;
-      default:
-        return <Badge variant="outline" className="text-zinc-400 text-[10px]">DRAFT</Badge>;
-    }
-  };
-
-  const getPriorityBadge = (p: string) => {
-    switch (p) {
-      case "URGENT":
-        return <Badge variant="destructive" className="text-[9px]">URGENT</Badge>;
-      case "HIGH":
-        return <Badge className="bg-orange-600/20 text-orange-400 border-orange-500/30 text-[9px]">HIGH</Badge>;
-      case "MEDIUM":
-        return <Badge className="bg-amber-600/20 text-amber-400 border-amber-500/30 text-[9px]">MEDIUM</Badge>;
-      default:
-        return <Badge variant="secondary" className="text-[9px]">LOW</Badge>;
-    }
-  };
-
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-6xl mx-auto pb-10">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-codex-border pb-4">
+      <div className="space-y-5 max-w-7xl mx-auto pb-12">
+        {/* Top Breadcrumb & Title Area */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center border border-blue-100">
-                <FileCheck2 className="w-4 h-4" />
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-codex-text font-serif">
-                Requirements
-              </h1>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+              <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
+                Dashboard
+              </Link>
+              <span>/</span>
+              <span className="text-slate-800 font-medium">Requirements</span>
             </div>
-            <p className="text-xs text-codex-muted mt-1">
-              Define specifications and acceptance criteria. Requirements drive engineering tasks and store immutable revision history.
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
+              Requirements
+            </h1>
+            <p className="text-xs text-slate-500 mt-1">
+              {filteredItems.length} requirements across {filteredProjectsCount} active {filteredProjectsCount === 1 ? "project" : "projects"}.
             </p>
+
+            {/* Status Summary Pills */}
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => setSelectedStatus(selectedStatus === "DRAFT" ? "ALL" : "DRAFT")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  selectedStatus === "DRAFT"
+                    ? "bg-slate-100 text-slate-900 border-slate-400 ring-1 ring-slate-400 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#94a3b8]" />
+                <span>Draft {statusCounts.DRAFT}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedStatus(selectedStatus === "IN_REVIEW" ? "ALL" : "IN_REVIEW")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  selectedStatus === "IN_REVIEW"
+                    ? "bg-amber-50 text-amber-900 border-amber-400 ring-1 ring-amber-400 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#f59e0b]" />
+                <span>In Review {statusCounts.IN_REVIEW}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedStatus(selectedStatus === "APPROVED" ? "ALL" : "APPROVED")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  selectedStatus === "APPROVED"
+                    ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#10b981]" />
+                <span>Approved {statusCounts.APPROVED}</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <Link href="/tasks">
-              <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5">
-                <ListTodo className="w-3.5 h-3.5 text-codex-accent" />
-                <span>View All Tasks</span>
-              </Button>
-            </Link>
-            <Button
-              size="sm"
-              onClick={() => setShowCreate(!showCreate)}
-              className="gap-1.5 text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-sm h-9"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{showCreate ? "Close Form" : "New Requirement"}</span>
-            </Button>
-          </div>
+
+          <Button
+            onClick={openCreateModal}
+            className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm flex items-center gap-1.5 self-start sm:self-auto h-9"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>New Requirement</span>
+          </Button>
         </div>
 
-        {/* Create Form Drawer / Card */}
-        {showCreate && (
-          <Card className="border-codex-accent/30 shadow-xl animate-in fade-in slide-in-from-top-2">
-            <CardHeader className="pb-3 border-b border-codex-border">
-              <CardTitle className="text-sm font-bold text-codex-text flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-codex-accent" />
-                <span>Create New Project Requirement</span>
-              </CardTitle>
-            </CardHeader>
-            <form onSubmit={handleCreate}>
-              <div className="p-5 space-y-4">
-                {errorMsg && (
-                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
+        {/* Filter Toolbar */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
+          {/* Left: Dropdown Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Project Filter */}
+            <div className="relative">
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
+              >
+                <option value="ALL">Project: All</option>
+                {activeProjectsList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    Project: {p.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
+            </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Requirement Title *</label>
-                  <Input
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g., User Authentication with Cookie Sessions"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Priority</label>
-                    <select
-                      value={priority}
-                      onChange={(e) => setPriority(e.target.value as any)}
-                      className="w-full h-9 rounded-lg border border-codex-border bg-white px-3 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-                    >
-                      <option value="LOW">Low</option>
-                      <option value="MEDIUM">Medium</option>
-                      <option value="HIGH">High</option>
-                      <option value="URGENT">Urgent</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Project Context</label>
-                    <div className="h-9 rounded-lg bg-slate-50 border border-codex-border px-3 flex items-center text-xs text-slate-600 font-mono">
-                      [{currentProject?.key}] {currentProject?.name}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Description</label>
-                  <textarea
-                    rows={2}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Provide context on why this requirement is necessary and the expected user experience..."
-                    className="w-full rounded-lg bg-white border border-codex-border p-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Acceptance Criteria</label>
-                    <span className="text-[10px] text-slate-400 font-mono">Recommended for QA & Testing</span>
-                  </div>
-                  <textarea
-                    rows={3}
-                    value={acceptanceCriteria}
-                    onChange={(e) => setAcceptanceCriteria(e.target.value)}
-                    placeholder="e.g., - Session cookie is httpOnly and secure&#10;- CSRF token is rotated and validated on mutation&#10;- Unauthorized requests return 401"
-                    className="w-full rounded-lg bg-white border border-codex-border p-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="p-4 bg-slate-50 border-t border-codex-border flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowCreate(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={submitting}
-                  className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
-                >
-                  {submitting ? "Saving..." : "Create Requirement"}
-                </Button>
-              </div>
-            </form>
-          </Card>
-        )}
-
-        {/* Search & Filter Toolbar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white border border-codex-border p-3 rounded-xl shadow-sm">
-          <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by title, key, or content..."
-              className="pl-8 h-8 text-xs"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <Filter className="w-3 h-3 text-slate-400" />
+            {/* Status Filter */}
+            <div className="relative">
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="h-8 rounded-lg border border-codex-border bg-white px-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-                aria-label="Filter by status"
+                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
               >
-                <option value="ALL">All Statuses</option>
-                <option value="DRAFT">Draft</option>
-                <option value="APPROVED">Approved</option>
-                <option value="IN_PROGRESS">In Progress</option>
-                <option value="DONE">Done</option>
-                <option value="ARCHIVED">Archived</option>
+                <option value="ALL">Status: All</option>
+                <option value="DRAFT">Status: Draft</option>
+                <option value="IN_REVIEW">Status: In Review</option>
+                <option value="APPROVED">Status: Approved</option>
               </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
             </div>
 
-            <select
-              value={selectedPriority}
-              onChange={(e) => setSelectedPriority(e.target.value)}
-              className="h-8 rounded-lg border border-codex-border bg-white px-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-              aria-label="Filter by priority"
-            >
-              <option value="ALL">All Priorities</option>
-              <option value="URGENT">Urgent</option>
-              <option value="HIGH">High</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="LOW">Low</option>
-            </select>
+            {/* Priority Filter */}
+            <div className="relative">
+              <select
+                value={selectedPriority}
+                onChange={(e) => setSelectedPriority(e.target.value)}
+                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
+              >
+                <option value="ALL">Priority: All</option>
+                <option value="HIGH">Priority: Must-have</option>
+                <option value="MEDIUM">Priority: Should-have</option>
+                <option value="LOW">Priority: Could-have</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Right: Search Filter */}
+          <div className="relative md:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter tasks..."
+              className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Items List */}
+        {/* Requirements Table Card */}
         {loading ? (
-          <div className="space-y-3">
-            <div className="h-24 rounded-xl bg-slate-200 animate-pulse" />
-            <div className="h-24 rounded-xl bg-slate-200 animate-pulse" />
-            <div className="h-24 rounded-xl bg-slate-200 animate-pulse" />
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-2xs space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+            ))}
           </div>
         ) : filteredItems.length === 0 ? (
-          <div className="text-center py-16 p-6 rounded-2xl border border-dashed border-codex-border bg-white space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center mx-auto">
-              <FileCheck2 className="w-5 h-5" />
+          <div className="text-center py-20 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3 shadow-2xs">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
+              <FileCheck2 className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-semibold text-codex-text">
-              {items.length === 0 ? "No Requirements Created Yet" : "No Matching Requirements Found"}
-            </h3>
-            <p className="text-xs text-codex-muted max-w-sm mx-auto">
+            <h3 className="text-sm font-semibold text-slate-900">No matching requirements found</h3>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
               {items.length === 0
-                ? "Requirements define the scope and criteria of your project. Create your first requirement to get started."
-                : "Try clearing your search query or adjusting your status filters."}
+                ? "No requirements created yet in this workspace. Create your first requirement to get started."
+                : "Try adjusting your project, status, or priority filters, or clear your search term."}
             </p>
             {items.length === 0 ? (
-              <Button size="sm" onClick={() => setShowCreate(true)} className="text-xs bg-codex-accent hover:bg-codex-hover text-white">
+              <Button
+                onClick={openCreateModal}
+                className="text-xs bg-[#2563eb] hover:bg-[#1d4ed8] text-white mt-2"
+              >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Create First Requirement
               </Button>
             ) : (
@@ -458,369 +633,508 @@ export default function RequirementsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setSearchQuery("");
+                  setSelectedProjectId("ALL");
                   setSelectedStatus("ALL");
                   setSelectedPriority("ALL");
+                  setSearchQuery("");
                 }}
-                className="text-xs"
+                className="text-xs mt-2"
               >
-                Clear Filters
+                Reset Filters
               </Button>
             )}
           </div>
         ) : (
-          <div className="space-y-3">
-            {filteredItems.map((req) => {
-              const isExpanded = expandedItems[req.id];
-              const linkedTasks = getLinkedTasks(req.id, req.displayKey);
-              const isSearchMatch =
-                searchQuery.trim() !== "" &&
-                (req.displayKey?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  req.title?.toLowerCase().includes(searchQuery.toLowerCase()));
+          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3 px-4 w-[44%]">Requirements</th>
+                    <th className="py-3 px-4 w-[18%]">Project</th>
+                    <th className="py-3 px-4 w-[13%]">Priority</th>
+                    <th className="py-3 px-4 w-[14%]">Updated By</th>
+                    <th className="py-3 px-4 w-[11%]">Updated</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {filteredItems.map((req) => {
+                    const projectName = req.project?.name || "AI Project Workspace";
+                    const updaterName = req.updater?.displayName || req.creator?.displayName || "Panhavorn";
+                    const priorityLabel = getPriorityLabel(req.priority);
+                    const priorityBadgeStyle = getPriorityBadgeStyle(req.priority);
+                    const projectBadgeStyle = getProjectBadgeStyle(projectName);
+                    const dotColor = getStatusDotColor(req.status);
+                    const relativeTime = formatRelativeTime(req.updatedAt);
 
-              return (
-                <Card
-                  key={req.id}
-                  className={`bg-white border-codex-border hover:border-codex-accent/40 transition-all shadow-sm ${
-                    isSearchMatch ? "ring-1 ring-codex-accent border-codex-accent" : ""
-                  }`}
-                >
-                  <CardHeader className="p-4 pb-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          onClick={() => copyToClipboard(req.displayKey || req.id, "key")}
-                          className="flex items-center gap-1 font-mono text-xs font-bold text-codex-accent bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-100 transition-all group"
-                          title="Click to copy key"
-                        >
-                          <span>{req.displayKey || req.id.substring(0, 8)}</span>
-                          <Copy className="w-3 h-3 text-codex-accent/60 group-hover:text-codex-accent" />
-                        </button>
-                        {getPriorityBadge(req.priority)}
-                        {getStatusBadge(req.status)}
-                        {linkedTasks.length > 0 ? (
-                          <Badge className="bg-emerald-50 text-[#2D8A60] border-emerald-200 text-[10px] font-mono">
-                            {linkedTasks.length} {linkedTasks.length === 1 ? "Task" : "Tasks"}
-                          </Badge>
-                        ) : (
-                          <span className="text-[10px] text-slate-400 font-mono">No tasks yet</span>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openRevisions(req)}
-                          className="h-5 text-[10px] font-mono px-2 py-0 border-slate-200 text-slate-600 hover:text-codex-accent hover:bg-slate-50 gap-1"
-                          title="View revision history"
-                        >
-                          <History className="w-2.5 h-2.5 text-slate-400" />
-                          <span>v{req.version}</span>
-                        </Button>
-                      </div>
-
-                      {/* Actions: AI Generate Tasks & Status dropdown */}
-                      <div className="flex items-center gap-2 self-start sm:self-auto">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={generatingProposalId === req.id}
-                          onClick={() => handleGenerateTasks(req)}
-                          className="h-6 text-[11px] border-blue-200 bg-blue-50 hover:bg-blue-100 text-codex-accent gap-1 px-2"
-                          title="AI generates actionable tasks for this requirement"
-                        >
-                          <Sparkles className={`w-3 h-3 ${generatingProposalId === req.id ? "animate-spin" : "text-codex-accent"}`} />
-                          <span>{generatingProposalId === req.id ? "Generating..." : "Generate Tasks"}</span>
-                        </Button>
-
-                        <span className="text-[10px] text-slate-500 font-medium">Status:</span>
-                        <select
-                          value={req.status}
-                          onChange={(e) => updateStatus(req, e.target.value)}
-                          className="text-xs bg-slate-50 border border-codex-border rounded-lg px-2 py-0.5 text-codex-text focus:outline-none focus:ring-1 focus:ring-codex-accent cursor-pointer"
-                        >
-                          <option value="DRAFT">DRAFT</option>
-                          <option value="APPROVED">APPROVED</option>
-                          <option value="IN_PROGRESS">IN PROGRESS</option>
-                          <option value="DONE">DONE</option>
-                          <option value="ARCHIVED">ARCHIVED</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <CardTitle className="text-sm font-semibold text-codex-text pt-2 leading-snug">
-                      {req.title}
-                    </CardTitle>
-                  </CardHeader>
-
-                  <CardContent className="p-4 pt-1 space-y-3">
-                    {req.description && (
-                      <p className="text-xs text-codex-muted leading-relaxed">
-                        {req.description}
-                      </p>
-                    )}
-
-                    {/* Acceptance Criteria Collapsible */}
-                    {req.acceptanceCriteria && (
-                      <div className="rounded-xl bg-slate-50 border border-codex-border p-3 space-y-1.5">
-                        <button
-                          onClick={() => toggleExpand(req.id)}
-                          className="w-full flex items-center justify-between text-xs font-semibold text-slate-700 hover:text-codex-text"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-[#2D8A60]" />
-                            <span>Acceptance Criteria</span>
-                          </span>
-                          {isExpanded ? (
-                            <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
-                          ) : (
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                          )}
-                        </button>
-                        {isExpanded && (
-                          <div className="pt-2 text-xs text-slate-800 whitespace-pre-wrap font-mono bg-white p-2.5 rounded-lg border border-codex-border animate-in fade-in">
-                            {req.acceptanceCriteria}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Inline Linked Tasks Drawer */}
-                    {expandedTasks[req.id] && (
-                      <div className="rounded-xl bg-slate-50 border border-codex-border p-3 space-y-2 animate-in fade-in">
-                        <div className="flex items-center justify-between text-xs pb-1 border-b border-codex-border">
-                          <span className="font-semibold text-slate-700 flex items-center gap-1.5">
-                            <ListTodo className="w-3.5 h-3.5 text-codex-accent" />
-                            <span>Linked Execution Tasks ({linkedTasks.length})</span>
-                          </span>
-                          <Link
-                            href={`/tasks?search=${encodeURIComponent(req.displayKey || req.id)}`}
-                            className="text-[11px] text-codex-accent hover:underline flex items-center gap-1"
-                          >
-                            <span>Open in Tasks</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </Link>
-                        </div>
-                        {linkedTasks.length === 0 ? (
-                          <div className="text-xs text-slate-500 py-2 text-center">
-                            No tasks linked yet. Click &quot;Add Task&quot; to break this requirement down!
-                          </div>
-                        ) : (
-                          <div className="space-y-1.5">
-                            {linkedTasks.map((t) => (
-                              <div
-                                key={t.id}
-                                className="p-2.5 rounded-lg bg-white border border-codex-border flex items-center justify-between text-xs gap-2"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="font-mono text-[10px] text-codex-accent shrink-0 font-semibold">{t.displayKey || "TSK"}</span>
-                                  <span className="text-codex-text truncate">{t.title}</span>
-                                  {t.dueDate && (
-                                    <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">Due: {t.dueDate}</span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {t.status === "DONE" ? (
-                                    <Badge variant="success" className="text-[9px]">DONE</Badge>
-                                  ) : (
-                                    <button
-                                      onClick={() => updateTaskStatus(t, "DONE")}
-                                      className="text-[10px] text-slate-500 hover:text-[#2D8A60] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-emerald-50 transition-colors"
-                                      title="Mark task done"
-                                    >
-                                      Complete
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Seamless Cross-Workflow Action Hub */}
-                    <div className="pt-2 border-t border-white/[0.04] flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Direct Create Task from Requirement */}
-                        <Link
-                          href={`/tasks?create=true&reqId=${req.id}&title=${encodeURIComponent(`Implement: ${req.title}`)}`}
-                        >
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-[11px] border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 gap-1 px-2 font-medium"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Add Task</span>
-                          </Button>
-                        </Link>
-
-                        {/* Inline View Tasks Toggle */}
-                        {linkedTasks.length > 0 && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => toggleExpandTasks(req.id)}
-                            className="h-6 text-[11px] text-zinc-400 hover:text-emerald-300 gap-1 px-2"
-                          >
-                            <ListTodo className="w-3 h-3 text-emerald-400" />
-                            <span>
-                              {expandedTasks[req.id] ? "Hide Tasks" : `View Tasks (${linkedTasks.length})`}
+                    return (
+                      <tr
+                        key={req.id}
+                        onClick={() => openDetailModal(req)}
+                        className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                      >
+                        {/* Requirements Column */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: dotColor }}
+                            />
+                            <span className="font-medium text-slate-800 group-hover:text-blue-600 transition-colors leading-relaxed">
+                              {req.title}
                             </span>
-                          </Button>
-                        )}
+                          </div>
+                        </td>
 
-                        {/* Direct Log ADR from Requirement */}
-                        <Link
-                          href={`/decisions?create=true&reqId=${req.id}&title=${encodeURIComponent(`Architectural Choice for: ${req.title}`)}`}
-                        >
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-[11px] border-purple-500/30 text-purple-400 hover:bg-purple-500/10 gap-1 px-2 font-medium"
-                            title="Log architectural decision (ADR) for this requirement"
+                        {/* Project Column */}
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border truncate max-w-[190px] ${projectBadgeStyle}`}
                           >
-                            <GitPullRequest className="w-3 h-3" />
-                            <span>Log ADR</span>
-                          </Button>
-                        </Link>
-
-                        {/* Requirement Revision History Button */}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openRevisions(req)}
-                          className="h-6 text-[11px] text-zinc-500 hover:text-slate-800 gap-1 px-2"
-                          title="View revision snapshots and audit history"
-                        >
-                          <History className="w-3 h-3 text-slate-400" />
-                          <span className="hidden sm:inline">History</span>
-                        </Button>
-
-                        {/* Consult AI Assistant with Pre-filled context */}
-                        <Link
-                          href={`/assistant?prompt=${encodeURIComponent(`Analyze requirement [${req.displayKey}]: "${req.title}". Acceptance criteria: "${req.acceptanceCriteria || 'None'}". What test cases and edge cases should we verify?`)}&mode=QA`}
-                        >
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 text-[11px] text-zinc-400 hover:text-indigo-300 gap-1 px-2"
-                            title="Open in AI Copilot for QA and test case analysis"
-                          >
-                            <Bot className="w-3 h-3 text-indigo-400" />
-                            <span className="hidden sm:inline">Ask Copilot</span>
-                          </Button>
-                        </Link>
-                      </div>
-
-                      <div className="flex items-center gap-3 text-[11px] text-zinc-500 font-mono">
-                        <span>Created {formatDate(req.createdAt)}</span>
-                        {req.createdBy && (
-                          <span className="hidden sm:inline">
-                            Author: {req.createdBy.displayName || req.createdBy.email}
+                            {projectName}
                           </span>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                        </td>
+
+                        {/* Priority Column */}
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${priorityBadgeStyle}`}
+                          >
+                            {priorityLabel}
+                          </span>
+                        </td>
+
+                        {/* Updated By Column */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-2xs ${getAvatarColor(
+                                updaterName
+                              )}`}
+                              title={updaterName}
+                            >
+                              {getInitials(updaterName)}
+                            </div>
+                            <span className="text-slate-700 font-medium truncate">
+                              {updaterName}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Updated Column */}
+                        <td className="py-3 px-4 text-slate-500 font-normal">
+                          {relativeTime}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
-
-        {/* Next in Workflow Guide Banner */}
-        <div className="p-4 rounded-xl bg-white border border-codex-border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-sm">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-codex-accent shrink-0" />
-            <span className="text-slate-600">
-              Next in workflow: Record architectural choices in <strong className="text-codex-accent">Decisions</strong> or track development in <strong className="text-[#2D8A60]">Tasks</strong>.
-            </span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Link href="/decisions">
-              <Button size="sm" variant="outline" className="h-8 text-xs">
-                Go to Decisions →
-              </Button>
-            </Link>
-            <Link href="/tasks">
-              <Button size="sm" className="h-8 text-xs bg-codex-accent hover:bg-codex-hover text-white">
-                Go to Tasks →
-              </Button>
-            </Link>
-          </div>
-        </div>
       </div>
 
-      {/* Revisions History Modal */}
-      {revisionsModalReq && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-codex-accent bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                    {revisionsModalReq.displayKey || revisionsModalReq.id.substring(0, 8)}
-                  </span>
-                  <h2 className="text-base font-bold text-slate-900 font-serif">
-                    Requirement Revision History
-                  </h2>
+      {/* CREATE REQUIREMENT MODAL */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div
+            className="fixed inset-0"
+            onClick={() => !submitting && setShowCreate(false)}
+          />
+          <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
                 </div>
-                <p className="text-xs text-slate-500 mt-1 line-clamp-1">
-                  {revisionsModalReq.title}
-                </p>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">New Requirement</h3>
+                  <p className="text-[11px] text-slate-500">Define specifications and acceptance criteria</p>
+                </div>
               </div>
               <button
-                onClick={() => setRevisionsModalReq(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                type="button"
+                onClick={() => setShowCreate(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-4 flex-1">
-              {loadingRevisions ? (
-                <div className="py-12 text-center text-xs text-slate-400">Loading requirement audit trail...</div>
-              ) : revisionsList.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-dashed border-slate-200">
-                  No past revisions recorded yet. This requirement is currently at baseline version (v{revisionsModalReq.version}).
+            <form onSubmit={handleCreate} className="p-6 space-y-4">
+              {/* Project Selection */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Project *</label>
+                <select
+                  required
+                  value={createProjectId}
+                  onChange={(e) => setCreateProjectId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="" disabled>
+                    Select project
+                  </option>
+                  {activeProjectsList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.key})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Title */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Title *</label>
+                <Input
+                  required
+                  value={createTitle}
+                  onChange={(e) => setCreateTitle(e.target.value)}
+                  placeholder="e.g. Auth must support email/password with hashed sessions"
+                  className="text-xs h-9"
+                />
+              </div>
+
+              {/* Priority & Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Priority</label>
+                  <select
+                    value={createPriority}
+                    onChange={(e) => setCreatePriority(e.target.value as any)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="HIGH">Must-have</option>
+                    <option value="MEDIUM">Should-have</option>
+                    <option value="LOW">Could-have</option>
+                  </select>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {revisionsList.map((rev: any, idx: number) => (
-                    <div
-                      key={rev.id || idx}
-                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2 relative"
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Initial Status</label>
+                  <select
+                    value={createStatus}
+                    onChange={(e) => setCreateStatus(e.target.value as any)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="DRAFT">Draft</option>
+                    <option value="IN_REVIEW">In Review</option>
+                    <option value="APPROVED">Approved</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Description</label>
+                <textarea
+                  rows={2}
+                  value={createDescription}
+                  onChange={(e) => setCreateDescription(e.target.value)}
+                  placeholder="Detailed functional context..."
+                  className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Acceptance Criteria */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Acceptance Criteria</label>
+                <textarea
+                  rows={3}
+                  value={createAcceptanceCriteria}
+                  onChange={(e) => setCreateAcceptanceCriteria(e.target.value)}
+                  placeholder="- Given valid credentials, when POST /api/v1/auth/login, then a secure cookie is returned."
+                  className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-mono shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCreate(false)}
+                  className="text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={submitting}
+                  className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                >
+                  {submitting ? "Creating..." : "Create Requirement"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REQUIREMENT DETAIL / EDIT MODAL */}
+      {activeReq && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div
+            className="fixed inset-0"
+            onClick={() => !editSubmitting && setActiveReq(null)}
+          />
+          <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: getStatusDotColor(editStatus) }}
+                />
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(activeReq.displayKey, "key")}
+                  className="font-mono text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-100 flex items-center gap-1 transition-all"
+                  title="Click to copy display key"
+                >
+                  <span>{activeReq.displayKey}</span>
+                  <Copy className="w-3 h-3 text-blue-500" />
+                </button>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[180px] ${getProjectBadgeStyle(
+                    activeReq.project?.name
+                  )}`}
+                >
+                  {activeReq.project?.name || "Workspace"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveReq(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <form onSubmit={handleUpdate} className="p-6 space-y-4 overflow-y-auto flex-1">
+              {/* Title */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Requirement Title *</label>
+                <Input
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="text-xs h-9 font-medium"
+                />
+              </div>
+
+              {/* Status & Priority */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as any)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="DRAFT">Draft</option>
+                    <option value="IN_REVIEW">In Review</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="IN_PROGRESS">In Progress</option>
+                    <option value="DONE">Done</option>
+                    <option value="ARCHIVED">Archived</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Priority</label>
+                  <select
+                    value={editPriority}
+                    onChange={(e) => setEditPriority(e.target.value as any)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="HIGH">Must-have</option>
+                    <option value="MEDIUM">Should-have</option>
+                    <option value="LOW">Could-have</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Description</label>
+                <textarea
+                  rows={2}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Context and specifications..."
+                  className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Acceptance Criteria */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700">Acceptance Criteria</label>
+                  <span className="text-[10px] text-slate-400 font-mono">QA & Verification Rules</span>
+                </div>
+                <textarea
+                  rows={3}
+                  value={editAcceptanceCriteria}
+                  onChange={(e) => setEditAcceptanceCriteria(e.target.value)}
+                  placeholder="- Acceptance rules..."
+                  className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-mono shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* AI & Revision Action Cards */}
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={generatingProposalId === activeReq.id}
+                  onClick={() => handleGenerateTasks(activeReq)}
+                  className="h-8 text-xs border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 gap-1.5 px-3"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${generatingProposalId === activeReq.id ? "animate-spin" : "text-blue-600"}`} />
+                  <span>{generatingProposalId === activeReq.id ? "Generating Tasks..." : "Generate Tasks with AI"}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openRevisions(activeReq)}
+                  className="h-8 text-xs border-slate-200 hover:bg-slate-50 text-slate-700 gap-1.5 px-3"
+                >
+                  <History className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Revisions (v{activeReq.version})</span>
+                </Button>
+              </div>
+
+              {/* Linked Tasks */}
+              {getLinkedTasks(activeReq.id, activeReq.displayKey).length > 0 && (
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs pb-1 border-b border-slate-200">
+                    <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                      <ListTodo className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Linked Tasks ({getLinkedTasks(activeReq.id, activeReq.displayKey).length})</span>
+                    </span>
+                    <Link
+                      href={`/tasks?search=${encodeURIComponent(activeReq.displayKey || activeReq.id)}`}
+                      className="text-[11px] text-blue-600 hover:underline flex items-center gap-1"
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-[#161927] text-white text-[10px] font-mono">
-                            v{rev.version}
-                          </Badge>
-                          {getStatusBadge(rev.status)}
-                          {getPriorityBadge(rev.priority)}
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {formatDateTime(rev.createdAt)}
-                        </span>
+                      <span>Open in Tasks</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {getLinkedTasks(activeReq.id, activeReq.displayKey).map((t: any) => (
+                      <div
+                        key={t.id}
+                        className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs shadow-2xs"
+                      >
+                        <span className="font-medium text-slate-800 truncate max-w-[320px]">{t.title}</span>
+                        <span className="text-[10px] font-mono text-slate-500 uppercase">{t.status}</span>
                       </div>
-                      <h4 className="text-xs font-bold text-slate-800 font-serif">{rev.title}</h4>
-                      {rev.description && (
-                        <div className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-100">
-                          {rev.description}
-                        </div>
-                      )}
-                      {rev.acceptanceCriteria && (
-                        <div className="text-[11px] font-mono text-slate-600 bg-white/80 p-2.5 rounded-lg border border-slate-100 whitespace-pre-wrap">
-                          <span className="font-semibold text-slate-700 font-sans block mb-1">Acceptance Criteria:</span>
-                          {rev.acceptanceCriteria}
-                        </div>
-                      )}
-                      <div className="text-[10px] text-slate-400 pt-1">
-                        Snapshot captured by: {rev.changedBy || "System"}
-                      </div>
-                    </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Footer Actions */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                  Delete
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setActiveReq(null)}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={editSubmitting}
+                    className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                  >
+                    {editSubmitting ? "Saving..." : "Save Changes"}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REVISIONS HISTORY MODAL */}
+      {revisionsModalReq && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="fixed inset-0" onClick={() => setRevisionsModalReq(null)} />
+          <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Revision History &bull; {revisionsModalReq.displayKey}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevisionsModalReq(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3 overflow-y-auto flex-1">
+              {loadingRevisions ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-14 bg-slate-100 rounded-xl animate-pulse" />
                   ))}
                 </div>
+              ) : revisionsList.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-8">
+                  No revisions found.
+                </p>
+              ) : (
+                revisionsList.map((rev) => (
+                  <div
+                    key={rev.id || rev.version}
+                    className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between font-mono">
+                      <span className="font-bold text-blue-600">v{rev.version}</span>
+                      <span className="text-[11px] text-slate-500">
+                        {formatRelativeTime(rev.createdAt)}
+                      </span>
+                    </div>
+                    <div className="font-medium text-slate-800">{rev.title}</div>
+                    {rev.description && (
+                      <p className="text-slate-600 text-[11px]">{rev.description}</p>
+                    )}
+                    <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-500 font-mono">
+                      <span>Status: {rev.status}</span>
+                      <span>&bull;</span>
+                      <span>Priority: {getPriorityLabel(rev.priority)}</span>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
 
@@ -838,20 +1152,16 @@ export default function RequirementsPage() {
         </div>
       )}
 
-      {activeProposal && currentProject && (
+      {/* AI PROPOSAL REVIEW DIALOG */}
+      {activeProposal && (
         <ProposalReviewDialog
           isOpen={!!activeProposal}
           onClose={() => setActiveProposal(null)}
           proposal={activeProposal}
-          projectId={currentProject.id}
-          onConfirmed={(resultRecordIds) => {
-            showToast(`Created ${resultRecordIds.length} tasks successfully!`, "success");
+          projectId={activeProposal.projectId || currentProject?.id || activeProjectsList[0]?.id || ""}
+          onConfirmed={() => {
             setActiveProposal(null);
             loadData();
-          }}
-          onRejected={() => {
-            showToast("Proposal discarded", "info");
-            setActiveProposal(null);
           }}
         />
       )}
