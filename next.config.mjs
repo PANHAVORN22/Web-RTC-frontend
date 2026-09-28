@@ -1,5 +1,15 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
-  async rewrites() { return [ { source: "/api/v1/:path*", destination: "http://localhost:3000/api/v1/:path*" } ]; }
+  output: "standalone",
+  async rewrites() {
+    const backendUrl = process.env.BACKEND_INTERNAL_URL || "http://localhost:3000";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendUrl}/api/v1/:path*`,
+      },
+    ];
+  },
 };
 export default nextConfig;
+
