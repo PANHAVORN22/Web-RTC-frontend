@@ -25,6 +25,12 @@ import {
   Bot,
   GripVertical,
 } from "lucide-react";
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  DropResult,
+} from "@hello-pangea/dnd";
 
 interface ProjectInfo {
   id: string;
@@ -166,11 +172,12 @@ export default function TasksPage() {
     BLOCKED: false,
   });
 
-  // Drag and Drop State
-  const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  // Client mounted state for @hello-pangea/dnd hydration safety
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -409,70 +416,24 @@ export default function TasksPage() {
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, task: TaskItem) => {
-    setDraggedTask(task);
-    setIsDragging(true);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", task.id);
-  };
+  const handleOnDragEnd = async (result: DropResult) => {
+    const { source, destination, draggableId } = result;
 
-  const handleDragEnd = () => {
-    setDraggedTask(null);
-    setDragOverColumn(null);
-    setDragOverIndex(null);
-    setTimeout(() => {
-      setIsDragging(false);
-    }, 150);
-  };
-
-  const handleDragOverColumn = (
-    e: React.DragEvent,
-    status: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED"
-  ) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (dragOverColumn !== status) {
-      setDragOverColumn(status);
-    }
-  };
-
-  const handleDragLeaveColumn = (
-    e: React.DragEvent,
-    status: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED"
-  ) => {
-    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-    if (dragOverColumn === status) {
-      setDragOverColumn(null);
-      setDragOverIndex(null);
-    }
-  };
-
-  const handleDragOverCard = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverIndex(index);
-  };
-
-  const handleDropOnColumn = async (
-    e: React.DragEvent,
-    targetStatus: "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED"
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!draggedTask) return;
-
-    const sourceStatus = draggedTask.status;
-    const taskToMove = draggedTask;
-    const dropIdx = dragOverIndex;
-
-    setDragOverColumn(null);
-    setDragOverIndex(null);
-
-    // If dropped in same column without position change, return
-    if (sourceStatus === targetStatus && dropIdx === null) {
+    if (!destination) return;
+    if (
+      source.droppableId === destination.droppableId &&
+      source.index === destination.index
+    ) {
       return;
     }
+
+    const sourceStatus = source.droppableId as "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED";
+    const targetStatus = destination.droppableId as "TODO" | "IN_PROGRESS" | "DONE" | "BLOCKED";
+
+    const taskToMove = tasks.find((t) => t.id === draggableId);
+    if (!taskToMove) return;
+
+    const previousTasks = [...tasks];
 
     // Determine new blocked reason
     let newBlockedReason = taskToMove.blockedReason;
@@ -488,54 +449,83 @@ export default function TasksPage() {
       blockedReason: newBlockedReason,
     };
 
-    // Optimistic update
-    const previousTasks = [...tasks];
-    setTasks((prev) => {
-      const filtered = prev.filter((t) => t.id !== taskToMove.id);
-      if (dropIdx !== null && dropIdx >= 0) {
-        const targetColTasks = filtered.filter((t) => t.status === targetStatus);
-        const otherTasks = filtered.filter((t) => t.status !== targetStatus);
-        targetColTasks.splice(dropIdx, 0, updatedTask);
-        return [...otherTasks, ...targetColTasks];
-      } else {
-        const targetColTasks = filtered.filter((t) => t.status === targetStatus);
-        const otherTasks = filtered.filter((t) => t.status !== targetStatus);
-        return [...otherTasks, updatedTask, ...targetColTasks];
-      }
+    // Calculate displayed target tasks for accurate insertion position
+    const targetColAll = tasks.filter((t) => {
+      let st: string = t.status;
+      if (st === "IN_REVIEW") st = "IN_PROGRESS";
+      if (st === "CANCELLED") st = "DONE";
+      return st === targetStatus && t.id !== taskToMove.id;
     });
 
-    try {
-      const saved = await api.tasks.update(taskToMove.projectId, taskToMove.id, {
-        version: taskToMove.version,
-        status: targetStatus,
-        blockedReason: newBlockedReason,
-      });
+    const isExpanded = expandedColumns[targetStatus] || false;
+    const targetColDisplayed = isExpanded ? targetColAll : targetColAll.slice(0, 4);
 
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskToMove.id
-            ? { ...t, version: saved.version, updatedAt: saved.updatedAt }
-            : t
-        )
-      );
+    setTasks((prev) => {
+      const remaining = prev.filter((t) => t.id !== taskToMove.id);
 
-      const statusLabels: Record<string, string> = {
-        TODO: "TO DO",
-        IN_PROGRESS: "IN PROGRESS",
-        DONE: "DONE",
-        BLOCKED: "BLOCKED",
-      };
+      if (destination.index < targetColDisplayed.length) {
+        const neighbor = targetColDisplayed[destination.index];
+        const neighborIdx = remaining.findIndex((t) => t.id === neighbor.id);
+        if (neighborIdx !== -1) {
+          remaining.splice(neighborIdx, 0, updatedTask);
+          return remaining;
+        }
+      }
 
-      showToast(`Moved to ${statusLabels[targetStatus] || targetStatus}`, "success");
-    } catch (err: any) {
-      console.error("Failed to move task:", err);
-      showToast(err.message || "Failed to move task. Reverting...", "error");
-      setTasks(previousTasks);
+      // If dropped at bottom of column or column is empty, find last matching task
+      let lastMatchIdx = -1;
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        let st: string = remaining[i].status;
+        if (st === "IN_REVIEW") st = "IN_PROGRESS";
+        if (st === "CANCELLED") st = "DONE";
+        if (st === targetStatus) {
+          lastMatchIdx = i;
+          break;
+        }
+      }
+
+      if (lastMatchIdx !== -1) {
+        remaining.splice(lastMatchIdx + 1, 0, updatedTask);
+        return remaining;
+      }
+
+      return [...remaining, updatedTask];
+    });
+
+    // If cross-column move, persist status change to backend
+    if (sourceStatus !== targetStatus) {
+      try {
+        const saved = await api.tasks.update(taskToMove.projectId, taskToMove.id, {
+          version: taskToMove.version,
+          status: targetStatus,
+          blockedReason: newBlockedReason,
+        });
+
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskToMove.id
+              ? { ...t, version: saved.version, updatedAt: saved.updatedAt }
+              : t
+          )
+        );
+
+        const statusLabels: Record<string, string> = {
+          TODO: "TO DO",
+          IN_PROGRESS: "IN PROGRESS",
+          DONE: "DONE",
+          BLOCKED: "BLOCKED",
+        };
+
+        showToast(`Moved to ${statusLabels[targetStatus] || targetStatus}`, "success");
+      } catch (err: any) {
+        console.error("Failed to move task:", err);
+        showToast(err.message || "Failed to move task. Reverting...", "error");
+        setTasks(previousTasks);
+      }
     }
   };
 
   const openEditModal = (task: TaskItem) => {
-    if (isDragging) return;
     setEditingTask(task);
     setEditTitle(task.title);
     setEditDescription(task.description || "");
@@ -806,178 +796,233 @@ export default function TasksPage() {
             )}
           </div>
         ) : viewMode === "board" ? (
-          /* Kanban Board View */
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start pt-1">
-            {COLUMNS.map((col) => {
-              const colTasks = tasksByStatus[col.status] || [];
-              const isExpanded = expandedColumns[col.status] || false;
-              const displayedTasks = isExpanded ? colTasks : colTasks.slice(0, 4);
-              const remainingCount = colTasks.length - 4;
-              const isColumnActive = dragOverColumn === col.status;
+          /* Kanban Board View with @hello-pangea/dnd fluid physics */
+          isMounted ? (
+            <DragDropContext onDragEnd={handleOnDragEnd}>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start pt-1">
+                {COLUMNS.map((col) => {
+                  const colTasks = tasksByStatus[col.status] || [];
+                  const isExpanded = expandedColumns[col.status] || false;
+                  const displayedTasks = isExpanded ? colTasks : colTasks.slice(0, 4);
+                  const remainingCount = colTasks.length - 4;
 
-              return (
-                <div
-                  key={col.status}
-                  onDragOver={(e) => handleDragOverColumn(e, col.status)}
-                  onDragLeave={(e) => handleDragLeaveColumn(e, col.status)}
-                  onDrop={(e) => handleDropOnColumn(e, col.status)}
-                  className={`rounded-2xl p-3 flex flex-col space-y-3 transition-all min-h-[440px] ${
-                    isColumnActive
-                      ? "bg-blue-50/70 border-2 border-dashed border-blue-400 ring-2 ring-blue-300/40 shadow-sm"
-                      : "bg-[#f8fafc]/90 border border-slate-200/80 shadow-2xs"
-                  }`}
-                >
-                  {/* Column Header */}
-                  <div className="flex items-center justify-between px-1 pt-1 pb-0.5">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full"
-                        style={{ backgroundColor: col.dotColor }}
-                      />
-                      <span className="text-[12px] font-bold text-slate-800 tracking-wider">
-                        {col.label}
+                  return (
+                    <div
+                      key={col.status}
+                      className="rounded-2xl p-3 flex flex-col space-y-3 bg-[#f8fafc]/90 border border-slate-200/80 shadow-2xs min-h-[440px]"
+                    >
+                      {/* Column Header */}
+                      <div className="flex items-center justify-between px-1 pt-1 pb-0.5">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: col.dotColor }}
+                          />
+                          <span className="text-[12px] font-bold text-slate-800 tracking-wider">
+                            {col.label}
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 bg-white border border-slate-200 rounded-full font-mono shadow-2xs">
+                          {colTasks.length}
+                        </span>
+                      </div>
+
+                      {/* Droppable Card Container */}
+                      <Droppable droppableId={col.status} type="TASK">
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className={`space-y-2.5 flex-1 min-h-[140px] rounded-xl p-1 -m-1 transition-colors duration-150 ${
+                              snapshot.isDraggingOver
+                                ? "bg-blue-50/70 ring-2 ring-blue-300/40 rounded-xl"
+                                : ""
+                            }`}
+                          >
+                            {displayedTasks.map((task, idx) => {
+                              const overdue = isTaskOverdue(task);
+                              const isBlocked = task.status === "BLOCKED";
+                              const isDone = task.status === "DONE" || task.status === "CANCELLED";
+                              const projectName = task.project?.name || "Workspace";
+                              const assigneeName = task.assignee?.displayName || "Unassigned";
+
+                              return (
+                                <Draggable
+                                  key={task.id}
+                                  draggableId={task.id}
+                                  index={idx}
+                                >
+                                  {(draggableProvided, draggableSnapshot) => (
+                                    <div
+                                      ref={draggableProvided.innerRef}
+                                      {...draggableProvided.draggableProps}
+                                      {...draggableProvided.dragHandleProps}
+                                      onClick={() => {
+                                        if (!draggableSnapshot.isDragging) {
+                                          openEditModal(task);
+                                        }
+                                      }}
+                                      style={{
+                                        ...draggableProvided.draggableProps.style,
+                                        ...(draggableSnapshot.isDragging &&
+                                        draggableProvided.draggableProps.style?.transform
+                                          ? {
+                                              transform: `${draggableProvided.draggableProps.style.transform} rotate(1.5deg)`,
+                                            }
+                                          : {}),
+                                      }}
+                                      className={`group relative bg-white border rounded-xl p-3.5 shadow-2xs select-none transition-shadow ${
+                                        draggableSnapshot.isDragging
+                                          ? "shadow-2xl ring-2 ring-blue-500/50 z-50 bg-white cursor-grabbing border-blue-400"
+                                          : "border-slate-200/90 hover:border-slate-300 hover:shadow-xs cursor-grab"
+                                      } space-y-2.5`}
+                                    >
+                                      {/* Top Row: Project Pill + Priority + Drag handle */}
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span
+                                          className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[190px] ${getProjectBadgeStyle(
+                                            projectName
+                                          )}`}
+                                        >
+                                          {projectName}
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                          {renderPriorityBadge(task.priority)}
+                                          <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                                        </div>
+                                      </div>
+
+                                      {/* Task Title */}
+                                      <h4 className="text-[12.5px] font-semibold text-slate-800 leading-snug group-hover:text-blue-600 transition-colors">
+                                        {task.title}
+                                      </h4>
+
+                                      {/* Blocked Alert Banner if Blocked */}
+                                      {(isBlocked || task.blockedReason) && (
+                                        <div className="bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] rounded-md px-2 py-1 text-[11px] flex items-center gap-1.5 font-normal">
+                                          <AlertCircle className="w-3 h-3 shrink-0" />
+                                          <span className="truncate">
+                                            {task.blockedReason || "Waiting on Phase 2 scope decision"}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {/* Bottom Row: Due Date / Completed status + Assignee Avatar */}
+                                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                                        {/* Left: Due Date or Completed */}
+                                        <div className="flex items-center gap-1 text-[11px]">
+                                          {isDone ? (
+                                            <span className="flex items-center gap-1 text-slate-500 font-medium">
+                                              <Check className="w-3.5 h-3.5 text-slate-400 stroke-[2.5]" />
+                                              <span>Completed</span>
+                                            </span>
+                                          ) : task.dueDate ? (
+                                            <span
+                                              className={`flex items-center gap-1 font-medium ${
+                                                overdue ? "text-[#dc2626]" : "text-slate-500"
+                                              }`}
+                                            >
+                                              <Calendar
+                                                className={`w-3.5 h-3.5 ${
+                                                  overdue ? "text-[#dc2626]" : "text-slate-400"
+                                                }`}
+                                              />
+                                              <span>{formatDueDate(task.dueDate)}</span>
+                                            </span>
+                                          ) : (
+                                            <span className="flex items-center gap-1 text-slate-400">
+                                              <Calendar className="w-3.5 h-3.5 text-slate-300" />
+                                              <span>-</span>
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Right: Assignee Avatar with Initials */}
+                                        <div
+                                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-2xs ${getAssigneeColor(
+                                            assigneeName
+                                          )}`}
+                                          title={assigneeName}
+                                        >
+                                          {getInitials(assigneeName)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </Draggable>
+                              );
+                            })}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+
+                      {/* Progressive Disclosure Expand Button */}
+                      {colTasks.length > 4 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleColumnExpand(col.status)}
+                          className="w-full py-2 text-center text-xs font-medium text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-2xs"
+                        >
+                          {isExpanded ? "Show less" : `+ ${remainingCount} more`}
+                        </button>
+                      )}
+
+                      {/* Add Task Button at Column Bottom */}
+                      <button
+                        type="button"
+                        onClick={() => openCreateModal(col.status)}
+                        className="w-full py-1.5 flex items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add task</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </DragDropContext>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start pt-1">
+              {COLUMNS.map((col) => {
+                const colTasks = tasksByStatus[col.status] || [];
+                const displayedTasks = colTasks.slice(0, 4);
+                return (
+                  <div
+                    key={col.status}
+                    className="rounded-2xl p-3 flex flex-col space-y-3 bg-[#f8fafc]/90 border border-slate-200/80 shadow-2xs min-h-[440px]"
+                  >
+                    <div className="flex items-center justify-between px-1 pt-1 pb-0.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: col.dotColor }}
+                        />
+                        <span className="text-[12px] font-bold text-slate-800 tracking-wider">
+                          {col.label}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 bg-white border border-slate-200 rounded-full font-mono shadow-2xs">
+                        {colTasks.length}
                       </span>
                     </div>
-                    <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 bg-white border border-slate-200 rounded-full font-mono shadow-2xs">
-                      {colTasks.length}
-                    </span>
-                  </div>
-
-                  {/* Drop Indicator placeholder when dragging into this column */}
-                  {isColumnActive && draggedTask?.status !== col.status && (
-                    <div className="border-2 border-dashed border-blue-400 bg-white/90 rounded-xl p-3 flex items-center justify-center gap-2 text-xs font-semibold text-blue-600 animate-in fade-in h-14 shadow-2xs">
-                      <Plus className="w-4 h-4 stroke-[2.5]" />
-                      <span>Drop in {col.label}</span>
-                    </div>
-                  )}
-
-                  {/* Task Cards Container */}
-                  <div className="space-y-2.5 flex-1">
-                    {displayedTasks.map((task, idx) => {
-                      const overdue = isTaskOverdue(task);
-                      const isBlocked = task.status === "BLOCKED";
-                      const isDone = task.status === "DONE" || task.status === "CANCELLED";
-                      const projectName = task.project?.name || "Workspace";
-                      const assigneeName = task.assignee?.displayName || "Unassigned";
-                      const isCardBeingDragged = draggedTask?.id === task.id;
-
-                      return (
+                    <div className="space-y-2.5 flex-1 min-h-[140px]">
+                      {displayedTasks.map((task) => (
                         <div
                           key={task.id}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, task)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => handleDragOverCard(e, idx)}
-                          onClick={() => {
-                            if (!isDragging) {
-                              openEditModal(task);
-                            }
-                          }}
-                          className={`group relative bg-white border rounded-xl p-3.5 shadow-2xs transition-all cursor-grab active:cursor-grabbing space-y-2.5 select-none ${
-                            isCardBeingDragged
-                              ? "opacity-30 scale-[0.97] border-dashed border-2 border-blue-400 shadow-none ring-2 ring-blue-200"
-                              : "border-slate-200/90 hover:border-slate-300 hover:shadow-xs"
-                          }`}
+                          className="bg-white border border-slate-200/90 rounded-xl p-3.5 shadow-2xs space-y-2.5"
                         >
-                          {/* Top Row: Project Pill + Priority + Drag handle */}
-                          <div className="flex items-center justify-between gap-2">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[190px] ${getProjectBadgeStyle(
-                                projectName
-                              )}`}
-                            >
-                              {projectName}
-                            </span>
-                            <div className="flex items-center gap-1.5">
-                              {renderPriorityBadge(task.priority)}
-                              <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
-                            </div>
-                          </div>
-
-                          {/* Task Title */}
-                          <h4 className="text-[12.5px] font-semibold text-slate-800 leading-snug group-hover:text-blue-600 transition-colors">
+                          <h4 className="text-[12.5px] font-semibold text-slate-800 leading-snug">
                             {task.title}
                           </h4>
-
-                          {/* Blocked Alert Banner if Blocked */}
-                          {(isBlocked || task.blockedReason) && (
-                            <div className="bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] rounded-md px-2 py-1 text-[11px] flex items-center gap-1.5 font-normal">
-                              <AlertCircle className="w-3 h-3 shrink-0" />
-                              <span className="truncate">
-                                {task.blockedReason || "Waiting on Phase 2 scope decision"}
-                              </span>
-                            </div>
-                          )}
-
-                          {/* Bottom Row: Due Date / Completed status + Assignee Avatar */}
-                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-                            {/* Left: Due Date or Completed */}
-                            <div className="flex items-center gap-1 text-[11px]">
-                              {isDone ? (
-                                <span className="flex items-center gap-1 text-slate-500 font-medium">
-                                  <Check className="w-3.5 h-3.5 text-slate-400 stroke-[2.5]" />
-                                  <span>Completed</span>
-                                </span>
-                              ) : task.dueDate ? (
-                                <span
-                                  className={`flex items-center gap-1 font-medium ${
-                                    overdue ? "text-[#dc2626]" : "text-slate-500"
-                                  }`}
-                                >
-                                  <Calendar
-                                    className={`w-3.5 h-3.5 ${
-                                      overdue ? "text-[#dc2626]" : "text-slate-400"
-                                    }`}
-                                  />
-                                  <span>{formatDueDate(task.dueDate)}</span>
-                                </span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-slate-400">
-                                  <Calendar className="w-3.5 h-3.5 text-slate-300" />
-                                  <span>-</span>
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Right: Assignee Avatar with Initials */}
-                            <div
-                              className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-2xs ${getAssigneeColor(
-                                assigneeName
-                              )}`}
-                              title={assigneeName}
-                            >
-                              {getInitials(assigneeName)}
-                            </div>
-                          </div>
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
                   </div>
-
-                  {/* Progressive Disclosure Expand Button */}
-                  {colTasks.length > 4 && (
-                    <button
-                      type="button"
-                      onClick={() => toggleColumnExpand(col.status)}
-                      className="w-full py-2 text-center text-xs font-medium text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-2xs"
-                    >
-                      {isExpanded ? "Show less" : `+ ${remainingCount} more`}
-                    </button>
-                  )}
-
-                  {/* Add Task Button at Column Bottom */}
-                  <button
-                    type="button"
-                    onClick={() => openCreateModal(col.status)}
-                    className="w-full py-1.5 flex items-center justify-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add task</span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )
         ) : (
           /* List View */
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs pt-0">
