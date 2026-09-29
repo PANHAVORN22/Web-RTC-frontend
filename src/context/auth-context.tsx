@@ -72,17 +72,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const list = await api.projects.list();
       setProjects(list || []);
       if (list && list.length > 0) {
-        const saved = localStorage.getItem("aiw_current_project");
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            const found = list.find((p: Project) => p.id === parsed.id);
-            setCurrentProjectState(found || list[0]);
-          } catch {
-            setCurrentProjectState(list[0]);
+        let activeProj: Project | null = null;
+        if (typeof window !== "undefined") {
+          const saved = localStorage.getItem("aiw_current_project");
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              activeProj = list.find((p: Project) => p.id === parsed.id) || null;
+            } catch {
+              activeProj = null;
+            }
           }
-        } else {
-          setCurrentProjectState((prev) => prev || list[0]);
+        }
+        if (!activeProj) {
+          activeProj = list[0];
+        }
+        setCurrentProjectState(activeProj);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("aiw_current_project", JSON.stringify(activeProj));
         }
       }
     } catch {

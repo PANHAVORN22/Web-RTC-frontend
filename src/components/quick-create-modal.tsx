@@ -51,6 +51,19 @@ export const QuickCreateModal: React.FC<QuickCreateModalProps> = ({
     }
   }, [currentProject, projects, isOpen]);
 
+  // Close on Escape key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const targetProject = projects.find((p) => p.id === selectedProjectId) || currentProject;
@@ -127,7 +140,12 @@ export const QuickCreateModal: React.FC<QuickCreateModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-codex-border overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-codex-border bg-slate-50/70">
