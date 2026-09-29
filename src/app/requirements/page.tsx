@@ -289,13 +289,18 @@ export default function RequirementsPage() {
       }
       // Status filter
       if (selectedStatus !== "ALL") {
-        if (selectedStatus === "DRAFT" && item.status !== "DRAFT") return false;
-        if (selectedStatus === "IN_REVIEW" && item.status !== "IN_REVIEW" && item.status !== "IN_PROGRESS") return false;
-        if (selectedStatus === "APPROVED" && item.status !== "APPROVED" && item.status !== "DONE") return false;
+        if (selectedStatus === "IN_REVIEW") {
+          if (item.status !== "IN_REVIEW" && item.status !== "IN_PROGRESS") return false;
+        } else if (selectedStatus === "APPROVED") {
+          if (item.status !== "APPROVED" && item.status !== "DONE") return false;
+        } else if (item.status !== selectedStatus) {
+          return false;
+        }
       }
       // Priority filter
       if (selectedPriority !== "ALL") {
-        if (selectedPriority === "HIGH" && item.priority !== "HIGH" && item.priority !== "URGENT") return false;
+        if (selectedPriority === "URGENT" && item.priority !== "URGENT") return false;
+        if (selectedPriority === "HIGH" && item.priority !== "HIGH") return false;
         if (selectedPriority === "MEDIUM" && item.priority !== "MEDIUM") return false;
         if (selectedPriority === "LOW" && item.priority !== "LOW") return false;
       }
@@ -562,6 +567,9 @@ export default function RequirementsPage() {
                 <option value="DRAFT">Status: Draft</option>
                 <option value="IN_REVIEW">Status: In Review</option>
                 <option value="APPROVED">Status: Approved</option>
+                <option value="IN_PROGRESS">Status: In Progress</option>
+                <option value="DONE">Status: Done</option>
+                <option value="ARCHIVED">Status: Archived</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
             </div>
@@ -574,6 +582,7 @@ export default function RequirementsPage() {
                 className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
               >
                 <option value="ALL">Priority: All</option>
+                <option value="URGENT">Priority: Urgent</option>
                 <option value="HIGH">Priority: Must-have</option>
                 <option value="MEDIUM">Priority: Should-have</option>
                 <option value="LOW">Priority: Could-have</option>
@@ -804,6 +813,7 @@ export default function RequirementsPage() {
                     onChange={(e) => setCreatePriority(e.target.value as any)}
                     className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                   >
+                    <option value="URGENT">Urgent</option>
                     <option value="HIGH">Must-have</option>
                     <option value="MEDIUM">Should-have</option>
                     <option value="LOW">Could-have</option>
@@ -952,6 +962,7 @@ export default function RequirementsPage() {
                     onChange={(e) => setEditPriority(e.target.value as any)}
                     className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                   >
+                    <option value="URGENT">Urgent</option>
                     <option value="HIGH">Must-have</option>
                     <option value="MEDIUM">Should-have</option>
                     <option value="LOW">Could-have</option>

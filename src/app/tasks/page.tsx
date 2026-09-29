@@ -297,7 +297,8 @@ export default function TasksPage() {
       }
       // Priority filter
       if (selectedPriority !== "ALL") {
-        if (selectedPriority === "HIGH" && t.priority !== "HIGH" && t.priority !== "URGENT") return false;
+        if (selectedPriority === "URGENT" && t.priority !== "URGENT") return false;
+        if (selectedPriority === "HIGH" && t.priority !== "HIGH") return false;
         if (selectedPriority === "MEDIUM" && t.priority !== "MEDIUM") return false;
         if (selectedPriority === "LOW" && t.priority !== "LOW") return false;
       }
@@ -691,6 +692,7 @@ export default function TasksPage() {
                 className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
               >
                 <option value="ALL">Priority: All</option>
+                <option value="URGENT">Priority: Urgent</option>
                 <option value="HIGH">Priority: High</option>
                 <option value="MEDIUM">Priority: Med</option>
                 <option value="LOW">Priority: Low</option>
@@ -1198,8 +1200,10 @@ export default function TasksPage() {
                     >
                       <option value="TODO">TO DO</option>
                       <option value="IN_PROGRESS">IN PROGRESS</option>
+                      <option value="IN_REVIEW">IN REVIEW</option>
                       <option value="DONE">DONE</option>
                       <option value="BLOCKED">BLOCKED</option>
+                      <option value="CANCELLED">CANCELLED</option>
                     </select>
                   </div>
 
@@ -1210,6 +1214,7 @@ export default function TasksPage() {
                       onChange={(e) => setCreatePriority(e.target.value as any)}
                       className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                     >
+                      <option value="URGENT">Urgent</option>
                       <option value="HIGH">High</option>
                       <option value="MEDIUM">Med</option>
                       <option value="LOW">Low</option>
@@ -1372,6 +1377,7 @@ export default function TasksPage() {
                     >
                       <option value="TODO">TO DO</option>
                       <option value="IN_PROGRESS">IN PROGRESS</option>
+                      <option value="IN_REVIEW">IN REVIEW</option>
                       <option value="DONE">DONE</option>
                       <option value="BLOCKED">BLOCKED</option>
                       <option value="CANCELLED">CANCELLED</option>
@@ -1385,6 +1391,7 @@ export default function TasksPage() {
                       onChange={(e) => setEditPriority(e.target.value as any)}
                       className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                     >
+                      <option value="URGENT">Urgent</option>
                       <option value="HIGH">High</option>
                       <option value="MEDIUM">Med</option>
                       <option value="LOW">Low</option>
