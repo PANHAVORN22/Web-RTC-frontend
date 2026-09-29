@@ -1,0 +1,20 @@
+services:
+  # ==============================================================================
+  # AI Workspace Frontend (Next.js 14)
+  # ==============================================================================
+  - type: web
+    name: ai-workspace-frontend
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: BACKEND_INTERNAL_URL
+        sync: false # Set to http://ai-workspace-backend:10000 or your backend URL
+      - key: NEXT_PUBLIC_API_URL
+        value: /api/v1
