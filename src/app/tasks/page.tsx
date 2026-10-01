@@ -8,6 +8,7 @@ import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import {
   Plus,
   Calendar,
@@ -150,6 +151,24 @@ function getProjectBadgeStyle(projectName?: string | null) {
   return "bg-purple-50 text-purple-700 border-purple-200";
 }
 
+const TASK_PROJECT_COLORS = [
+  "#C0392B",
+  "#8B5CF6",
+  "#3B82F6",
+  "#059669",
+  "#D97706",
+  "#EC4899",
+  "#6366F1",
+];
+
+const TASK_ASSIGNEE_COLORS = ["#6366F1", "#D97706", "#C0392B", "#059669", "#8B5CF6"];
+
+const TASK_PRIORITY_OPTIONS: FilterOption[] = [
+  { value: "HIGH", label: "High", color: "#C0392B", textColor: "#C0392B" },
+  { value: "MEDIUM", label: "Medium", color: "#D97706", textColor: "#D97706" },
+  { value: "LOW", label: "Low", color: "#059669", textColor: "#059669" },
+];
+
 export default function TasksPage() {
   const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
@@ -272,6 +291,29 @@ export default function TasksPage() {
     return Array.from(map.values());
   }, [projects, tasks]);
 
+  const taskProjectOptions: FilterOption[] = useMemo(() => {
+    return activeProjectsList.map((p, idx) => ({
+      value: p.id,
+      label: p.name,
+      color: TASK_PROJECT_COLORS[idx % TASK_PROJECT_COLORS.length],
+    }));
+  }, [activeProjectsList]);
+
+  const taskAssigneeOptions: FilterOption[] = useMemo(() => {
+    if (assigneesList.length === 0) {
+      return [
+        { value: "Fong", label: "Fong", color: "#6366F1" },
+        { value: "Panhavorn", label: "Panhavorn", color: "#D97706" },
+        { value: "Mengchheang", label: "Mengchheang", color: "#C0392B" },
+      ];
+    }
+    return assigneesList.map((a, idx) => ({
+      value: a.name,
+      label: a.name,
+      color: TASK_ASSIGNEE_COLORS[idx % TASK_ASSIGNEE_COLORS.length],
+    }));
+  }, [assigneesList]);
+
   const isTaskOverdue = useCallback(
     (task: TaskItem) => {
       if (!task.dueDate) return false;
@@ -297,8 +339,7 @@ export default function TasksPage() {
       }
       // Priority filter
       if (selectedPriority !== "ALL") {
-        if (selectedPriority === "URGENT" && t.priority !== "URGENT") return false;
-        if (selectedPriority === "HIGH" && t.priority !== "HIGH") return false;
+        if (selectedPriority === "HIGH" && (t.priority !== "HIGH" && t.priority !== "URGENT")) return false;
         if (selectedPriority === "MEDIUM" && t.priority !== "MEDIUM") return false;
         if (selectedPriority === "LOW" && t.priority !== "LOW") return false;
       }
@@ -651,54 +692,31 @@ export default function TasksPage() {
           {/* Left: Dropdown Filters */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Project Dropdown */}
-            <div className="relative">
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
-              >
-                <option value="ALL">Project: All</option>
-                {activeProjectsList.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    Project: {p.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Project"
+              allLabel="All projects"
+              value={selectedProjectId}
+              onChange={setSelectedProjectId}
+              options={taskProjectOptions}
+            />
 
             {/* Assignee Dropdown */}
-            <div className="relative">
-              <select
-                value={selectedAssignee}
-                onChange={(e) => setSelectedAssignee(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
-              >
-                <option value="ALL">Assignee: All</option>
-                {assigneesList.map((a) => (
-                  <option key={a.id} value={a.name}>
-                    Assignee: {a.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Assignee"
+              allLabel="Everyone"
+              value={selectedAssignee}
+              onChange={setSelectedAssignee}
+              options={taskAssigneeOptions}
+            />
 
             {/* Priority Dropdown */}
-            <div className="relative">
-              <select
-                value={selectedPriority}
-                onChange={(e) => setSelectedPriority(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
-              >
-                <option value="ALL">Priority: All</option>
-                <option value="URGENT">Priority: Urgent</option>
-                <option value="HIGH">Priority: High</option>
-                <option value="MEDIUM">Priority: Med</option>
-                <option value="LOW">Priority: Low</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Priority"
+              allLabel="All priorities"
+              value={selectedPriority}
+              onChange={setSelectedPriority}
+              options={TASK_PRIORITY_OPTIONS}
+            />
           </div>
 
           {/* Right: Search & View Switcher */}

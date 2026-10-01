@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
+import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import { api } from "@/lib/api";
 import {
   Upload,
@@ -147,6 +148,33 @@ function getProjectBadgeStyle(projectName?: string, projectKey?: string) {
   }
   return "bg-slate-50 text-slate-600 border border-slate-200";
 }
+
+// Filter color palettes and options matching design
+const PROJECT_FILTER_COLORS = [
+  "#C0392B",
+  "#8B5CF6",
+  "#3B82F6",
+  "#059669",
+  "#D97706",
+  "#EC4899",
+  "#6366F1",
+];
+
+const TYPE_FILTER_OPTIONS: FilterOption[] = [
+  { value: "pdf", label: "PDF", color: "#C0392B" },
+  { value: "image", label: "Image", color: "#8B5CF6" },
+  { value: "word", label: "Word", color: "#3B82F6" },
+  { value: "excel", label: "Excel", color: "#059669" },
+  { value: "presentation", label: "PowerPoint", color: "#D97706" },
+];
+
+const UPLOADER_FILTER_OPTIONS: FilterOption[] = [
+  { value: "Fong", label: "Fong", color: "#6366F1" },
+  { value: "Meng", label: "Mengchheang", color: "#D97706" },
+  { value: "Panhavorn", label: "Panhavorn", color: "#059669" },
+  { value: "John", label: "John Smith", color: "#C0392B" },
+  { value: "Jane", label: "Jane Doe", color: "#3B82F6" },
+];
 
 export default function DocumentsPage() {
   const { currentProject, projects } = useAuth();
@@ -297,6 +325,15 @@ export default function DocumentsPage() {
     });
     return Math.max(projectSet.size, projects?.length || 1);
   }, [filteredDocuments, projects]);
+
+  const projectFilterOptions: FilterOption[] = useMemo(() => {
+    if (!projects) return [];
+    return projects.map((p, idx) => ({
+      value: p.id,
+      label: p.name,
+      color: PROJECT_FILTER_COLORS[idx % PROJECT_FILTER_COLORS.length],
+    }));
+  }, [projects]);
 
   // Download handler
   const handleDownload = async (doc: any, e?: React.MouseEvent) => {
@@ -489,58 +526,31 @@ export default function DocumentsPage() {
           {/* Left filters */}
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Project Filter */}
-            <div className="relative">
-              <select
-                aria-label="Filter documents by project"
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2 pr-8 text-xs font-medium text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs cursor-pointer transition-all"
-              >
-                <option value="ALL">Project: All</option>
-                {projects &&
-                  projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      Project: {p.name}
-                    </option>
-                  ))}
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Project"
+              allLabel="All projects"
+              value={selectedProject}
+              onChange={setSelectedProject}
+              options={projectFilterOptions}
+            />
 
             {/* Type Filter */}
-            <div className="relative">
-              <select
-                aria-label="Filter documents by file type"
-                value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2 pr-8 text-xs font-medium text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs cursor-pointer transition-all"
-              >
-                <option value="ALL">Type: All</option>
-                <option value="pdf">Type: PDF</option>
-                <option value="image">Type: Image (PNG / JPG)</option>
-                <option value="word">Type: Word (DOCX)</option>
-                <option value="excel">Type: Excel (XLSX / CSV)</option>
-                <option value="presentation">Type: Presentation (PPTX)</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Type"
+              allLabel="All types"
+              value={selectedType}
+              onChange={setSelectedType}
+              options={TYPE_FILTER_OPTIONS}
+            />
 
             {/* Uploaded By Filter */}
-            <div className="relative">
-              <select
-                aria-label="Filter documents by uploader"
-                value={selectedUploader}
-                onChange={(e) => setSelectedUploader(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2 pr-8 text-xs font-medium text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs cursor-pointer transition-all"
-              >
-                <option value="ALL">Uploaded by: All</option>
-                <option value="Panhavorn">Uploaded by: Panhavorn</option>
-                <option value="Meng">Uploaded by: Meng Fong</option>
-                <option value="John">Uploaded by: John Smith</option>
-                <option value="Jane">Uploaded by: Jane Doe</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Uploaded by"
+              allLabel="Everyone"
+              value={selectedUploader}
+              onChange={setSelectedUploader}
+              options={UPLOADER_FILTER_OPTIONS}
+            />
           </div>
 
           {/* Right search & view switcher */}

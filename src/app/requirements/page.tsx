@@ -9,6 +9,7 @@ import { ProposalReviewDialog } from "@/components/ai/proposal-review-dialog";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import {
   Plus,
   Search,
@@ -168,6 +169,28 @@ function formatRelativeTime(dateStr: string | null | undefined): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+const REQUIREMENT_PROJECT_COLORS = [
+  "#C0392B",
+  "#8B5CF6",
+  "#3B82F6",
+  "#059669",
+  "#D97706",
+  "#EC4899",
+  "#6366F1",
+];
+
+const REQUIREMENT_STATUS_OPTIONS: FilterOption[] = [
+  { value: "DRAFT", label: "Draft", color: "#9CA3AF" },
+  { value: "IN_REVIEW", label: "In Review", color: "#D97706" },
+  { value: "APPROVED", label: "Approved", color: "#059669" },
+];
+
+const REQUIREMENT_PRIORITY_OPTIONS: FilterOption[] = [
+  { value: "HIGH", label: "High", color: "#C0392B", textColor: "#C0392B" },
+  { value: "MEDIUM", label: "Medium", color: "#D97706", textColor: "#D97706" },
+  { value: "LOW", label: "Low", color: "#059669", textColor: "#059669" },
+];
+
 export default function RequirementsPage() {
   const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
@@ -263,6 +286,14 @@ export default function RequirementsPage() {
     return Array.from(map.values());
   }, [projects, items]);
 
+  const requirementProjectOptions: FilterOption[] = useMemo(() => {
+    return activeProjectsList.map((p, idx) => ({
+      value: p.id,
+      label: p.name,
+      color: REQUIREMENT_PROJECT_COLORS[idx % REQUIREMENT_PROJECT_COLORS.length],
+    }));
+  }, [activeProjectsList]);
+
   // Compute counts for top summary pills
   const statusCounts = useMemo(() => {
     let draft = 0;
@@ -299,8 +330,7 @@ export default function RequirementsPage() {
       }
       // Priority filter
       if (selectedPriority !== "ALL") {
-        if (selectedPriority === "URGENT" && item.priority !== "URGENT") return false;
-        if (selectedPriority === "HIGH" && item.priority !== "HIGH") return false;
+        if (selectedPriority === "HIGH" && item.priority !== "HIGH" && item.priority !== "URGENT") return false;
         if (selectedPriority === "MEDIUM" && item.priority !== "MEDIUM") return false;
         if (selectedPriority === "LOW" && item.priority !== "LOW") return false;
       }
@@ -540,55 +570,31 @@ export default function RequirementsPage() {
           {/* Left: Dropdown Filters */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Project Filter */}
-            <div className="relative">
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
-              >
-                <option value="ALL">Project: All</option>
-                {activeProjectsList.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    Project: {p.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Project"
+              allLabel="All projects"
+              value={selectedProjectId}
+              onChange={setSelectedProjectId}
+              options={requirementProjectOptions}
+            />
 
             {/* Status Filter */}
-            <div className="relative">
-              <select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
-              >
-                <option value="ALL">Status: All</option>
-                <option value="DRAFT">Status: Draft</option>
-                <option value="IN_REVIEW">Status: In Review</option>
-                <option value="APPROVED">Status: Approved</option>
-                <option value="IN_PROGRESS">Status: In Progress</option>
-                <option value="DONE">Status: Done</option>
-                <option value="ARCHIVED">Status: Archived</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Status"
+              allLabel="All statuses"
+              value={selectedStatus}
+              onChange={setSelectedStatus}
+              options={REQUIREMENT_STATUS_OPTIONS}
+            />
 
             {/* Priority Filter */}
-            <div className="relative">
-              <select
-                value={selectedPriority}
-                onChange={(e) => setSelectedPriority(e.target.value)}
-                className="appearance-none bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-slate-700 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer h-9"
-              >
-                <option value="ALL">Priority: All</option>
-                <option value="URGENT">Priority: Urgent</option>
-                <option value="HIGH">Priority: Must-have</option>
-                <option value="MEDIUM">Priority: Should-have</option>
-                <option value="LOW">Priority: Could-have</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
-            </div>
+            <FilterDropdown
+              label="Priority"
+              allLabel="All priorities"
+              value={selectedPriority}
+              onChange={setSelectedPriority}
+              options={REQUIREMENT_PRIORITY_OPTIONS}
+            />
           </div>
 
           {/* Right: Search Filter */}
