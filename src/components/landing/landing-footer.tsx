@@ -68,7 +68,7 @@ export const LandingFooter: React.FC = () => {
               </li>
               <li>
                 <span className="text-zinc-500 font-mono text-[11px]">
-                  Alice (Admin) • Bob (Member)
+                  Demo Account
                 </span>
               </li>
             </ul>

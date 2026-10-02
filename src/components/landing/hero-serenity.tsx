@@ -67,7 +67,7 @@ export const HeroSerenity: React.FC = () => {
         </Link>
         <Link href="/login">
           <button className="px-5 py-3 text-xs font-medium text-zinc-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.1] rounded-full transition-all">
-            Explore Demo (Alice &amp; Bob)
+            Demo Account
           </button>
         </Link>
       </div>
