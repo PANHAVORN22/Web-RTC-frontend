@@ -739,7 +739,7 @@ export default function ProjectDetailPage() {
               )}
             </div>
             <p className="text-xs text-slate-500">
-              Phase 1 · Foundation & Core Workspace — internal team tool for centralizing project knowledge
+              {projectData?.description || "Centralized workspace for project requirements, tasks, documents, and AI-grounded insights"}
             </p>
           </div>
 
@@ -907,10 +907,10 @@ export default function ProjectDetailPage() {
                 </h2>
                 <div className="text-xs text-slate-600 leading-relaxed space-y-3">
                   <p>
-                    Cortex centralizes requirements, decisions, tasks, meetings, and documents for the team into one permission-aware workspace, replacing scattered docs and chat threads with a single source of truth.
+                    {projectData?.description || "Cortex centralizes requirements, decisions, tasks, meetings, and documents for the team into one permission-aware workspace, replacing scattered docs and chat threads with a single source of truth."}
                   </p>
                   <p>
-                    This MVP covers Phase 1 only — authentication, roles and permissions, project management, the dashboard, and core CRUD for requirements, tasks, documents, meetings, and decisions. The Phase 2 AI Copilot (chat, semantic search, RAG, meeting summarization) is planned as future work once this phase is signed off.
+                    The workspace is powered by pgvector semantic search and an integrated AI Copilot for grounded Q&amp;A, requirement analysis, and citation-backed project intelligence.
                   </p>
                 </div>
               </div>
@@ -985,7 +985,7 @@ export default function ProjectDetailPage() {
                         : `${members.length} members`}
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      {daysLeft !== null ? "To MVP deadline" : "Team members"}
+                      {daysLeft !== null ? "To target deadline" : "Team members"}
                     </div>
                   </div>
                 </div>
@@ -1119,7 +1119,7 @@ export default function ProjectDetailPage() {
                       <p className="text-[11px] text-slate-400">
                         {projectData?.targetDate
                           ? `Due ${formatDate(projectData.targetDate)}`
-                          : "Phase 1 completion"}
+                          : "Target delivery"}
                       </p>
                     </div>
                   </div>
@@ -2273,10 +2273,10 @@ export default function ProjectDetailPage() {
                       {/* Dashed Preview Box */}
                       <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center bg-slate-50/50 space-y-1">
                         <p className="text-xs text-slate-500 font-medium">
-                          Preview not available in this MVP.
+                          Preview not available for this file type.
                         </p>
                         <p className="text-xs text-slate-400">
-                          Download the file to view its contents.
+                          Download the file to view its full contents.
                         </p>
                       </div>
                     </div>
@@ -2287,7 +2287,7 @@ export default function ProjectDetailPage() {
                         Indexing Status
                       </h4>
                       <div className="p-3.5 rounded-xl bg-[#E8F5E9] text-[#2D8A60] text-xs leading-relaxed">
-                        This document has been processed and is ready to be referenced once the AI Copilot ships in Phase 2.
+                        This document is ingested into the pgvector knowledge base. AI Copilot uses its semantic content for cross-referencing and contextual citation.
                       </div>
                     </div>
                   </div>
@@ -2341,7 +2341,7 @@ export default function ProjectDetailPage() {
                       Knowledge Base
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Every document on this project — the source material the AI Copilot will search in Phase 2.
+                      Every document on this project — source material ingested into the pgvector knowledge base for AI Copilot retrieval.
                     </p>
                   </div>
                   <Button
@@ -2358,7 +2358,7 @@ export default function ProjectDetailPage() {
                 <div className="flex items-start gap-3 p-3.5 rounded-xl bg-blue-50/80 border border-blue-200/80 text-blue-900 text-xs leading-relaxed">
                   <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                   <p>
-                    Documents uploaded here become the foundation for AI search once the Copilot ships in Phase 2. For this MVP, you can upload, view, and delete files — no AI search yet.
+                    Documents uploaded here are automatically ingested into the project knowledge base with vector embeddings. AI Copilot uses them for semantic search, grounded Q&amp;A, and citation-backed insights.
                   </p>
                 </div>
 
@@ -2380,81 +2380,98 @@ export default function ProjectDetailPage() {
                 </div>
 
                 {/* Documents List matching media_1790901769184.png */}
-                <div className="space-y-3">
-                  {filteredDocuments.map((doc) => {
-                    const docTitle = String(doc.title || doc.originalFilename || "Document");
-                    const isPdf = docTitle.toLowerCase().endsWith(".pdf");
-                    const isWord = docTitle.toLowerCase().endsWith(".docx");
-                    const isImage = docTitle.toLowerCase().endsWith(".png") || docTitle.toLowerCase().endsWith(".jpg");
-                    const statusStr = formatDocStatus(doc.status);
-                    const docSizeStr = formatDocSize(doc);
-                    const uploaderName = getUploaderName(doc, "Panhavorn");
-                    const dateStr = String(doc.uploadedDate || (doc.createdAt ? formatDate(doc.createdAt) : "20 Sep 2026"));
+                {filteredDocuments.length > 0 ? (
+                  <div className="space-y-3">
+                    {filteredDocuments.map((doc) => {
+                      const docTitle = String(doc.title || doc.originalFilename || "Document");
+                      const isPdf = docTitle.toLowerCase().endsWith(".pdf") || doc.mimeType?.includes("pdf");
+                      const isWord = docTitle.toLowerCase().endsWith(".docx") || doc.mimeType?.includes("word");
+                      const isImage =
+                        docTitle.toLowerCase().endsWith(".png") ||
+                        docTitle.toLowerCase().endsWith(".jpg") ||
+                        doc.mimeType?.includes("image");
+                      const statusStr = formatDocStatus(doc.status);
+                      const docSizeStr = formatDocSize(doc);
+                      const uploaderName = getUploaderName(doc, "Team member");
+                      const dateStr = doc.createdAt ? formatDate(doc.createdAt) : doc.uploadedDate || "Recently";
 
-                    return (
-                      <div
-                        key={doc.id}
-                        onClick={() => setSelectedDoc(doc)}
-                        className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-slate-300 transition-all flex items-center justify-between gap-4 cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          <div
-                            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                              isPdf
-                                ? "bg-rose-50 text-rose-600"
-                                : isWord
-                                ? "bg-blue-50 text-blue-600"
-                                : "bg-purple-50 text-purple-600"
-                            }`}
-                          >
-                            {isImage ? (
-                              <ImageIcon className="w-5 h-5" />
+                      return (
+                        <div
+                          key={doc.id}
+                          onClick={() => setSelectedDoc(doc)}
+                          className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs hover:border-slate-300 transition-all flex items-center justify-between gap-4 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                                isPdf
+                                  ? "bg-rose-50 text-rose-600"
+                                  : isWord
+                                  ? "bg-blue-50 text-blue-600"
+                                  : "bg-purple-50 text-purple-600"
+                              }`}
+                            >
+                              {isImage ? (
+                                <ImageIcon className="w-5 h-5" />
+                              ) : (
+                                <FileText className="w-5 h-5" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-semibold text-slate-900 truncate">
+                                {docTitle}
+                              </h4>
+                              <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                {doc.type || (isPdf ? "PDF" : isWord ? "Word" : "Image")} · {docSizeStr} · Uploaded by {uploaderName} · {dateStr}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            {statusStr === "Indexed" ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
+                                Indexed
+                              </span>
+                            ) : statusStr === "Processing" ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                                Processing
+                              </span>
                             ) : (
-                              <FileText className="w-5 h-5" />
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
+                                Failed
+                              </span>
                             )}
-                          </div>
-                          <div className="min-w-0">
-                            <h4 className="text-xs font-semibold text-slate-900 truncate">
-                              {docTitle}
-                            </h4>
-                            <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                              {doc.type || (isPdf ? "PDF" : isWord ? "Word" : "Image")} · {docSizeStr} · Uploaded by {uploaderName} · {dateStr}
-                            </p>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDocToDelete(doc);
+                              }}
+                              className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors"
+                            >
+                              <MoreHorizontal className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
-
-                        <div className="flex items-center gap-3 shrink-0">
-                          {statusStr === "Indexed" ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60]">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                              Indexed
-                            </span>
-                          ) : statusStr === "Processing" ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
-                              Processing
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-600" />
-                              Failed
-                            </span>
-                          )}
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDocToDelete(doc);
-                            }}
-                            className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors"
-                          >
-                            <MoreHorizontal className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
+                    <div className="w-10 h-10 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center mx-auto">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <p className="text-xs font-semibold text-slate-700">
+                      {tabDocuments.length === 0 ? "No documents uploaded yet" : "No documents match your search"}
+                    </p>
+                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                      Upload specifications, architecture diagrams, and meeting notes to build this project&apos;s knowledge base.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </div>

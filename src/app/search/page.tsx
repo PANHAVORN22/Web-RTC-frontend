@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/context/auth-context";
 import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
@@ -83,31 +83,55 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  const executeSearch = async (
-    searchTerm: string,
-    typeFilter?: string,
-    mode: "hybrid" | "semantic" | "keyword" = searchMode
-  ) => {
-    if (!currentProject || !searchTerm.trim()) return;
-    setLoading(true);
-    setHasSearched(true);
-    try {
-      const envelope = await api.search.query(
-        currentProject.id,
-        searchTerm.trim(),
-        typeFilter || undefined,
-        1,
-        25,
-        mode
-      );
-      setResults(envelope.data || []);
-      setMeta(envelope.meta || null);
-    } catch (err: any) {
-      console.error("Search failed:", err);
-    } finally {
-      setLoading(false);
+  const executeSearch = useCallback(
+    async (
+      searchTerm: string,
+      typeFilter?: string,
+      mode: "hybrid" | "semantic" | "keyword" = searchMode
+    ) => {
+      if (!currentProject || !searchTerm.trim()) return;
+      setLoading(true);
+      setHasSearched(true);
+      try {
+        const envelope = await api.search.query(
+          currentProject.id,
+          searchTerm.trim(),
+          typeFilter || undefined,
+          1,
+          25,
+          mode
+        );
+        setResults(envelope.data || []);
+        setMeta(envelope.meta || null);
+      } catch (err: any) {
+        console.error("Search failed:", err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentProject, searchMode]
+  );
+
+  // Read URL query parameter (?q= or ?search=) on load and execute search
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const incomingQuery = params.get("q") || params.get("search");
+      if (incomingQuery && incomingQuery.trim()) {
+        const trimmed = incomingQuery.trim();
+        setQuery(trimmed);
+        const typeParam = params.get("type");
+        const modeParam = params.get("mode") as any;
+        const validMode =
+          modeParam === "semantic" || modeParam === "keyword" ? modeParam : "hybrid";
+        if (modeParam) setSearchMode(validMode);
+        if (typeParam) setSelectedType(typeParam);
+        if (currentProject) {
+          executeSearch(trimmed, typeParam || undefined, validMode);
+        }
+      }
     }
-  };
+  }, [currentProject, executeSearch]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -382,7 +406,7 @@ export default function SearchPage() {
               const baseLink = TYPE_LINKS[item.type] || "/dashboard";
               const searchParam = item.key || item.title;
               const externalUrl = item.type === "GITHUB_ISSUE" && item.metadata?.htmlUrl ? (item.metadata.htmlUrl as string) : null;
-              const targetUrl = externalUrl || (searchParam ? `${baseLink}?search=${encodeURIComponent(searchParam)}` : baseLink);
+              const targetUrl = externalUrl || `${baseLink}?id=${item.id}${searchParam ? `&search=${encodeURIComponent(searchParam)}` : ""}`;
               const colorClass = TYPE_COLORS[item.type] || "bg-slate-100 text-slate-700";
 
               return (
@@ -414,8 +438,6 @@ export default function SearchPage() {
                         )}
                         <Link
                           href={targetUrl}
-                          target={externalUrl ? "_blank" : undefined}
-                          rel={externalUrl ? "noopener noreferrer" : undefined}
                           className="text-xs font-bold text-slate-900 group-hover:text-codex-accent transition-colors hover:underline font-serif"
                         >
                           {item.title}
@@ -443,8 +465,6 @@ export default function SearchPage() {
 
                         <Link
                           href={targetUrl}
-                          target={externalUrl ? "_blank" : undefined}
-                          rel={externalUrl ? "noopener noreferrer" : undefined}
                         >
                           <Button
                             variant="ghost"

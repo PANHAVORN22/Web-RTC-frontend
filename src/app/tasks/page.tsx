@@ -182,6 +182,7 @@ export default function TasksPage() {
   const [selectedAssignee, setSelectedAssignee] = useState<string>("ALL");
   const [selectedPriority, setSelectedPriority] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [targetTaskId, setTargetTaskId] = useState<string | null>(null);
 
   // Column Progressive Disclosure (limit to 4 initially)
   const [expandedColumns, setExpandedColumns] = useState<Record<string, boolean>>({
@@ -263,8 +264,27 @@ export default function TasksPage() {
       if (q) {
         setSearchQuery(q);
       }
+      const targetId = params.get("id") || params.get("taskId");
+      if (targetId) {
+        setTargetTaskId(targetId);
+      }
     }
   }, []);
+
+  // Auto-open inspected task modal if id/taskId is in URL
+  useEffect(() => {
+    if (!targetTaskId || tasks.length === 0) return;
+    const found = tasks.find(
+      (t) =>
+        t.id === targetTaskId ||
+        t.id.toLowerCase() === targetTaskId.toLowerCase() ||
+        t.displayKey?.toLowerCase() === targetTaskId.toLowerCase()
+    );
+    if (found) {
+      openEditModal(found);
+      setTargetTaskId(null);
+    }
+  }, [tasks, targetTaskId]);
 
   // Compute unique assignees from tasks & project members
   const assigneesList = useMemo(() => {
@@ -351,7 +371,8 @@ export default function TasksPage() {
         const matchAssignee = t.assignee?.displayName.toLowerCase().includes(q);
         const matchReason = t.blockedReason?.toLowerCase().includes(q);
         const matchKey = t.displayKey?.toLowerCase().includes(q);
-        if (!matchTitle && !matchProject && !matchAssignee && !matchReason && !matchKey) {
+        const matchId = t.id.toLowerCase() === q;
+        if (!matchTitle && !matchProject && !matchAssignee && !matchReason && !matchKey && !matchId) {
           return false;
         }
       }
@@ -426,7 +447,7 @@ export default function TasksPage() {
     setCreateDueDate("");
     setCreateAssigneeId("");
     setCreateBlockedReason(
-      initialStatus === "BLOCKED" ? "Waiting on Phase 2 scope decision" : ""
+      initialStatus === "BLOCKED" ? "Waiting on dependency / review" : ""
     );
     setCreateModalOpen(true);
   };
@@ -480,7 +501,7 @@ export default function TasksPage() {
     // Determine new blocked reason
     let newBlockedReason = taskToMove.blockedReason;
     if (targetStatus === "BLOCKED" && !newBlockedReason) {
-      newBlockedReason = "Waiting on Phase 2 scope decision";
+      newBlockedReason = "Waiting on dependency / review";
     } else if (targetStatus !== "BLOCKED") {
       newBlockedReason = null;
     }
@@ -922,7 +943,7 @@ export default function TasksPage() {
                                         <div className="bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] rounded-md px-2 py-1 text-[11px] flex items-center gap-1.5 font-normal">
                                           <AlertCircle className="w-3 h-3 shrink-0" />
                                           <span className="truncate">
-                                            {task.blockedReason || "Waiting on Phase 2 scope decision"}
+                                            {task.blockedReason || "Waiting on dependency / review"}
                                           </span>
                                         </div>
                                       )}
@@ -1120,8 +1141,8 @@ export default function TasksPage() {
                         {/* Due Column */}
                         <td className="py-3 px-4">
                           {isBlocked ? (
-                            <span className="text-[11px] text-slate-500 font-normal block" title={task.blockedReason || "Waiting on Phase 2 scope decision"}>
-                              {task.blockedReason || "Waiting on Phase 2 scope decision"}
+                            <span className="text-[11px] text-slate-500 font-normal block" title={task.blockedReason || "Waiting on dependency / review"}>
+                              {task.blockedReason || "Waiting on dependency / review"}
                             </span>
                           ) : isDone ? (
                             <span className="text-[11px] text-slate-400 font-normal">Completed</span>
@@ -1251,7 +1272,7 @@ export default function TasksPage() {
                       required
                       value={createBlockedReason}
                       onChange={(e) => setCreateBlockedReason(e.target.value)}
-                      placeholder="e.g. Waiting on Phase 2 scope decision"
+                      placeholder="e.g. Waiting on dependency or review"
                       className="h-8 text-xs bg-white border-red-300 focus:ring-red-500"
                     />
                   </div>
@@ -1428,7 +1449,7 @@ export default function TasksPage() {
                       required
                       value={editBlockedReason}
                       onChange={(e) => setEditBlockedReason(e.target.value)}
-                      placeholder="e.g. Waiting on Phase 2 scope decision"
+                      placeholder="e.g. Waiting on dependency or review"
                       className="h-8 text-xs bg-white border-red-300 focus:ring-red-500"
                     />
                   </div>
