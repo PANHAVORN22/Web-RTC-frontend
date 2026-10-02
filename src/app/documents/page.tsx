@@ -28,6 +28,7 @@ import {
   Sparkles,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
 
@@ -200,6 +201,7 @@ export default function DocumentsPage() {
   const [selectedType, setSelectedType] = useState<string>("ALL");
   const [selectedUploader, setSelectedUploader] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [targetDocId, setTargetDocId] = useState<string | null>(null);
 
   // Modals state
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -207,9 +209,14 @@ export default function DocumentsPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Selected document detail modal
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
+
+  // Delete confirmation modal state ("Indexing Status")
+  const [deleteConfirmDoc, setDeleteConfirmDoc] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Revision modal state
   const [revisionsModalDoc, setRevisionsModalDoc] = useState<any | null>(null);
@@ -256,6 +263,37 @@ export default function DocumentsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("upload") === "true") {
+        setUploadModalOpen(true);
+      }
+      const q = params.get("search");
+      if (q) {
+        setSearchQuery(q);
+      }
+      const targetId = params.get("id") || params.get("docId");
+      if (targetId) {
+        setTargetDocId(targetId);
+      }
+    }
+  }, []);
+
+  // Auto-open inspected document modal if id/docId is in URL
+  useEffect(() => {
+    if (!targetDocId || docs.length === 0) return;
+    const found = docs.find(
+      (d: any) =>
+        d.id === targetDocId ||
+        d.id?.toLowerCase() === targetDocId.toLowerCase()
+    );
+    if (found) {
+      setSelectedDoc(found);
+      setTargetDocId(null);
+    }
+  }, [docs, targetDocId]);
 
   useEffect(() => {
     loadData();
@@ -309,7 +347,8 @@ export default function DocumentsPage() {
         const matchesName = (doc.originalFilename || "").toLowerCase().includes(q);
         const matchesTitle = (doc.title || "").toLowerCase().includes(q);
         const matchesProject = (doc.project?.name || "").toLowerCase().includes(q);
-        if (!matchesName && !matchesTitle && !matchesProject) return false;
+        const matchesId = (doc.id || "").toLowerCase() === q;
+        if (!matchesName && !matchesTitle && !matchesProject && !matchesId) return false;
       }
 
       return true;
@@ -350,37 +389,74 @@ export default function DocumentsPage() {
     }
   };
 
-  // Delete handler
-  const handleDelete = async (doc: any, e?: React.MouseEvent) => {
+  // Delete handler - opens custom Indexing Status confirmation modal
+  const handleDelete = (doc: any, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!confirm(`Are you sure you want to delete "${doc.originalFilename || doc.title}"?`)) {
-      return;
-    }
+    setDeleteConfirmDoc(doc);
+  };
 
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmDoc) return;
+    setDeleting(true);
     try {
-      await api.documents.delete(doc.projectId, doc.id);
-      showToast(`Deleted "${doc.originalFilename || doc.title}"`, "success");
-      if (selectedDoc?.id === doc.id) setSelectedDoc(null);
+      await api.documents.delete(deleteConfirmDoc.projectId, deleteConfirmDoc.id);
+      showToast(
+        `Deleted “${deleteConfirmDoc.originalFilename || deleteConfirmDoc.title}”`,
+        "success"
+      );
+      if (selectedDoc?.id === deleteConfirmDoc.id) setSelectedDoc(null);
+      setDeleteConfirmDoc(null);
       await loadData();
     } catch (err: any) {
       showToast(err.message || "Failed to delete document", "error");
+    } finally {
+      setDeleting(false);
     }
   };
 
+  const handleSelectFile = (file: File) => {
+    setUploadError(null);
+    const MAX_SIZE = 10 * 1024 * 1024; // 10 MB limit matching reference
+    if (file.size > MAX_SIZE) {
+      setUploadError(`"${file.name}" is larger than the 10 MB limit.`);
+      setUploadFile(null);
+      return;
+    }
+    setUploadFile(file);
+    if (!uploadTitle) {
+      setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
+    }
+  };
+
+  const handleCloseUploadModal = () => {
+    if (uploading) return;
+    setUploadModalOpen(false);
+    setUploadFile(null);
+    setUploadError(null);
+    setUploadTitle("");
+  };
+
+  const handleRetryUpload = () => {
+    setUploadError(null);
+    setUploadFile(null);
+    fileInputRef.current?.click();
+  };
+
   // Upload handler
-  const handlePerformUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePerformUpload = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!uploadFile) {
-      showToast("Please choose a file to upload", "error");
+      setUploadError("Please choose a file to upload");
       return;
     }
     const targetProjId = uploadProjectId || currentProject?.id || projects?.[0]?.id;
     if (!targetProjId) {
-      showToast("Please select a project", "error");
+      setUploadError("Please select an active project workspace");
       return;
     }
 
     setUploading(true);
+    setUploadError(null);
     const formData = new FormData();
     formData.append("file", uploadFile);
     formData.append("title", uploadTitle.trim() || uploadFile.name);
@@ -390,10 +466,11 @@ export default function DocumentsPage() {
       showToast(`Uploaded "${uploadFile.name}" successfully!`, "success");
       setUploadModalOpen(false);
       setUploadFile(null);
+      setUploadError(null);
       setUploadTitle("");
       await loadData();
     } catch (err: any) {
-      showToast(err.message || "Upload failed", "error");
+      setUploadError(err.message || "Failed to upload document. Please retry.");
     } finally {
       setUploading(false);
     }
@@ -842,154 +919,186 @@ export default function DocumentsPage() {
         {mounted &&
           uploadModalOpen &&
           createPortal(
-            <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
               <div
                 className="fixed inset-0"
-                onClick={() => !uploading && setUploadModalOpen(false)}
+                onClick={handleCloseUploadModal}
               />
-              <div className="relative w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-blue-600" />
-                  <h3 className="text-sm font-bold text-slate-900">Upload New Document</h3>
-                </div>
-                <button
-                  type="button"
-                  disabled={uploading}
-                  onClick={() => setUploadModalOpen(false)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <form onSubmit={handlePerformUpload} className="p-6 space-y-4">
-                {/* Project selector */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700 block">
-                    Target Project
-                  </label>
-                  <select
-                    value={uploadProjectId}
-                    onChange={(e) => setUploadProjectId(e.target.value)}
-                    required
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  >
-                    {projects &&
-                      projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.key})
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                {/* File Dropzone */}
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDragging(true);
-                  }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragging(false);
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) {
-                      setUploadFile(file);
-                      if (!uploadTitle) setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
-                    }
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
-                    isDragging
-                      ? "border-blue-500 bg-blue-50/50"
-                      : "border-slate-200 hover:border-slate-300 bg-slate-50/40 hover:bg-slate-50"
-                  }`}
-                >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setUploadFile(file);
-                        if (!uploadTitle) setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
-                      }
-                    }}
-                  />
-                  <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-2.5">
-                    <Upload className="w-5 h-5" />
+              <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 sm:p-7 border border-slate-100 overflow-hidden z-10 animate-in fade-in zoom-in-95">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-xl font-bold font-serif text-slate-900 tracking-tight">
+                      Upload document
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      Adds to {currentProject?.name || "AI Project Workspace"}&apos;s knowledge base.
+                    </p>
                   </div>
-                  {uploadFile ? (
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold text-slate-800 truncate max-w-xs mx-auto">
-                        {uploadFile.name}
-                      </p>
-                      <p className="text-[11px] text-slate-500 font-mono">
-                        {formatFileSize(uploadFile.size)}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold text-slate-700">
-                        Click to upload or drag & drop
-                      </p>
-                      <p className="text-[11px] text-slate-400">
-                        PDF, Word (.docx), Excel (.xlsx), PPTX, PNG, JPG (up to 20MB)
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Document Title (Optional) */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700 block">
-                    Document Title (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={uploadTitle}
-                    onChange={(e) => setUploadTitle(e.target.value)}
-                    placeholder="e.g. System Architecture Specification"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  />
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                   <button
                     type="button"
                     disabled={uploading}
-                    onClick={() => setUploadModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-medium transition-all"
+                    onClick={handleCloseUploadModal}
+                    className="text-slate-400 hover:text-slate-600 transition-colors p-1 -mr-1 -mt-1 cursor-pointer"
+                    aria-label="Close dialog"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={uploading || !uploadFile}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-medium shadow-xs transition-all flex items-center gap-1.5"
-                  >
-                    {uploading ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Uploading...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Upload File</span>
-                      </>
-                    )}
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
-              </form>
-            </div>
-          </div>,
-          document.body
-        )}
+
+                {/* Hidden input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt,.md"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleSelectFile(file);
+                  }}
+                />
+
+                {/* State 1: Error State (Image 3) */}
+                {uploadError ? (
+                  <>
+                    <div className="mt-5 rounded-xl border border-[#e57373] bg-[#fbf0ef] px-4 py-3.5 flex items-center gap-3 text-[#c53929] text-sm">
+                      <AlertTriangle className="w-5 h-5 text-[#c53929] shrink-0 stroke-[2.2]" />
+                      <span className="leading-snug text-[#c53929] font-normal">{uploadError}</span>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2.5 mt-6">
+                      <button
+                        type="button"
+                        onClick={handleCloseUploadModal}
+                        className="px-5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-900 text-sm font-semibold transition-colors cursor-pointer bg-white"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRetryUpload}
+                        className="px-5 py-2 rounded-xl bg-[#4361ee] hover:bg-[#3651d4] text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </>
+                ) : uploadFile ? (
+                  /* State 2: Valid File Selected */
+                  <>
+                    <div className="mt-5 p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">
+                            {uploadFile.name}
+                          </p>
+                          <p className="text-xs text-slate-500 font-mono">
+                            {formatFileSize(uploadFile.size)}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={uploading}
+                        onClick={() => {
+                          setUploadFile(null);
+                          fileInputRef.current?.click();
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium shrink-0 cursor-pointer disabled:opacity-50"
+                      >
+                        Change
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2.5 mt-6">
+                      <button
+                        type="button"
+                        disabled={uploading}
+                        onClick={handleCloseUploadModal}
+                        className="px-5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-900 text-sm font-semibold transition-colors cursor-pointer bg-white disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={uploading}
+                        onClick={() => handlePerformUpload()}
+                        className="px-5 py-2 rounded-xl bg-[#4361ee] hover:bg-[#3651d4] disabled:opacity-50 text-white text-sm font-semibold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        {uploading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Uploading...</span>
+                          </>
+                        ) : (
+                          <span>Upload</span>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* State 3: Empty Dropzone State (Image 1 & 2) */
+                  <>
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragging(true);
+                      }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) handleSelectFile(file);
+                      }}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`mt-5 border border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                        isDragging
+                          ? "border-blue-500 bg-blue-50/50"
+                          : "border-slate-300 hover:border-slate-400 bg-slate-50/40 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex justify-center mb-2.5">
+                        <svg
+                          className="w-5 h-5 text-slate-900"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M12 17V5" />
+                          <path d="m7 10 5-5 5 5" />
+                          <path d="M5 20h14" />
+                        </svg>
+                      </div>
+                      <p className="text-base font-bold text-slate-900">
+                        Drop a file here, or click to browse
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        PDF, Word, or image — up to 10 MB
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-end mt-6">
+                      <button
+                        type="button"
+                        onClick={handleCloseUploadModal}
+                        className="px-5 py-2 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-900 text-sm font-semibold transition-colors cursor-pointer bg-white"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>,
+            document.body
+          )}
 
         {/* DOCUMENT DETAILS MODAL */}
         {mounted &&
@@ -1219,6 +1328,76 @@ export default function DocumentsPage() {
           </div>,
           document.body
         )}
+
+        {/* DELETE CONFIRMATION MODAL ("Indexing Status" matching screenshot) */}
+        {mounted &&
+          deleteConfirmDoc &&
+          createPortal(
+            <div className="fixed inset-0 z-[120] bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+              <div
+                className="fixed inset-0"
+                onClick={() => !deleting && setDeleteConfirmDoc(null)}
+              />
+              <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 sm:p-7 border border-slate-100 overflow-hidden z-10 animate-in fade-in zoom-in-95">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-xl font-bold font-serif text-slate-900 tracking-tight">
+                      Indexing Status
+                    </h3>
+                    <p className="text-sm sm:text-base text-slate-600 font-normal mt-1">
+                      “{deleteConfirmDoc.originalFilename || deleteConfirmDoc.title}” will be permanently removed.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setDeleteConfirmDoc(null)}
+                    className="text-slate-400 hover:text-slate-600 transition-colors p-1 -mr-1 -mt-1 cursor-pointer disabled:opacity-50"
+                    aria-label="Close dialog"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Warning Banner */}
+                <div className="mt-4 rounded-xl border border-[#e57373] bg-[#fbf0ef] px-4 py-3.5 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-[#c53929] shrink-0 mt-0.5 stroke-[2.2]" />
+                  <p className="text-sm leading-relaxed text-[#c53929] font-normal">
+                    This can&apos;t be undone. If it&apos;s already indexed, the AI Copilot will no longer be able to reference it once that feature ships.
+                  </p>
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="flex items-center justify-end gap-3 mt-6">
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setDeleteConfirmDoc(null)}
+                    className="px-5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-900 text-sm font-semibold transition-colors cursor-pointer bg-white disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={handleConfirmDelete}
+                    className="px-5 py-2.5 rounded-xl bg-[#c53929] hover:bg-[#b03022] text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {deleting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <span>Delete document</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
       </div>
     </AppLayout>
   );
