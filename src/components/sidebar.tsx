@@ -9,6 +9,7 @@ import { AiWorkspaceLogo } from "@/components/ai-workspace-logo";
 import {
   LayoutDashboard,
   Folder,
+  Users,
   FileCheck2,
   CheckSquare,
   Files,
@@ -28,6 +29,7 @@ interface SidebarProps {
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", href: "/projects", icon: Folder },
+  { label: "Team", href: "/team", icon: Users },
   { label: "Requirements", href: "/requirements", icon: FileCheck2 },
   { label: "Tasks", href: "/tasks", icon: CheckSquare },
   { label: "Documents", href: "/documents", icon: Files },
