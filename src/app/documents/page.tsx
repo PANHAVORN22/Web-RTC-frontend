@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/app-layout";
 import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import { api } from "@/lib/api";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { DocumentIndexStatus } from "@/components/document-index-status";
 import {
   Upload,
   Download,
@@ -30,7 +31,6 @@ import {
   RefreshCw,
   AlertCircle,
   AlertTriangle,
-  CheckCircle2,
 } from "lucide-react";
 
 // Format file size nicely (e.g. 2.4 MB, 860 KB)
@@ -186,7 +186,6 @@ export default function DocumentsPage() {
   const revisionFileInputRef = useRef<HTMLInputElement>(null);
 
   const [docs, setDocs] = useState<any[]>([]);
-  const [sources, setSources] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
@@ -245,18 +244,9 @@ export default function DocumentsPage() {
         : (response as any)?.data || [];
 
       setDocs(docsList);
-
-      // Load ingestion sources if a project is selected
-      if (currentProject) {
-        try {
-          const sourcesData = await api.ingestion.listSources(currentProject.id, {
-            sourceType: "DOCUMENT",
-          });
-          setSources(sourcesData || []);
-        } catch {
-          setSources([]);
-        }
-      }
+      setSelectedDoc((previous: any) =>
+        previous ? docsList.find((doc: any) => doc.id === previous.id) || previous : null
+      );
     } catch (err: any) {
       console.error("Failed to load documents:", err);
       showToast(err.message || "Failed to load documents", "error");
@@ -1172,21 +1162,10 @@ export default function DocumentsPage() {
                 </div>
 
                 {/* Processing & Ingestion Status */}
-                <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-100 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-800">
-                      AI Ingestion & Knowledge Index
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      Indexed
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    This document is ingested into the pgvector knowledge base. AI Copilot uses
-                    its semantic content for cross-referencing and contextual citation.
-                  </p>
-                </div>
+                <DocumentIndexStatus
+                  key={`${selectedDoc.id}:${selectedDoc.revision}`}
+                  document={selectedDoc}
+                />
 
                 {/* Primary Actions */}
                 <div className="flex flex-wrap items-center gap-2 pt-2">
