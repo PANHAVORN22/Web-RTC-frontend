@@ -590,4 +590,32 @@ export const api = {
       },
     },
   },
+  workspace: {
+    getMembers: async () => apiRequest<any[]>("/workspace/members"),
+    getInvites: async () => apiRequest<any[]>("/workspace/invites"),
+    createInvite: async (data: { email: string; systemRole?: string; professionalRole?: string }) =>
+      apiRequest<any>("/workspace/invites", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    cancelInvite: async (id: string) =>
+      apiRequest<any>(`/workspace/invites/${id}`, {
+        method: "DELETE",
+      }),
+  },
+  invites: {
+    getPreview: async (token: string) =>
+      apiRequest<{
+        email: string;
+        systemRole: string;
+        professionalRole: string;
+        expiresAt: string;
+        inviterName?: string;
+      }>(`/auth/invite/${encodeURIComponent(token)}`),
+    accept: async (data: { token: string; name: string; password: string }) =>
+      apiRequest<{ user: any; csrfToken: string }>("/auth/accept-invite", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
 };
