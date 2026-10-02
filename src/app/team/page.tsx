@@ -9,7 +9,6 @@ import { api } from "@/lib/api";
 import {
   Users,
   UserPlus,
-  Mail,
   Shield,
   Clock,
   Copy,
@@ -17,7 +16,6 @@ import {
   Search,
   CheckCircle2,
   X,
-  Code,
   ShieldAlert,
 } from "lucide-react";
 import { CustomDropdown, type CustomDropdownOption } from "@/components/ui/custom-dropdown";
@@ -193,23 +191,6 @@ export default function TeamPage() {
     [invites]
   );
 
-  const adminCount = useMemo(
-    () => members.filter((m) => m.systemRole === "ADMIN").length,
-    [members]
-  );
-
-  const developerCount = useMemo(
-    () => members.filter((m) => m.professionalRole === "DEVELOPER").length,
-    [members]
-  );
-
-  const expiringSoonCount = useMemo(() => {
-    return pendingInvites.filter((inv) => {
-      const diff = new Date(inv.expiresAt).getTime() - Date.now();
-      return diff > 0 && diff <= 48 * 60 * 60 * 1000;
-    }).length;
-  }, [pendingInvites]);
-
   // Chip management logic
   const mergeEmails = (raw: string): string[] | null => {
     const tokens = raw.split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean);
@@ -383,82 +364,6 @@ export default function TeamPage() {
             </p>
           </div>
         </div>
-
-        {/* Overview KPI Cards Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Total Members */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Workspace Members
-              </span>
-              <div className="text-2xl sm:text-3xl font-bold font-serif text-slate-900">
-                {members.length}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                {adminCount} {adminCount === 1 ? "Admin" : "Admins"} active
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 border border-blue-100/60 flex items-center justify-center shrink-0">
-              <Users className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-
-          {/* Card 2: Developers */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Engineers & Devs
-              </span>
-              <div className="text-2xl sm:text-3xl font-bold font-serif text-slate-900">
-                {developerCount}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Product developers
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100/60 flex items-center justify-center shrink-0">
-              <Code className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-
-          {/* Card 3: Pending Invites */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Pending Invites
-              </span>
-              <div className="text-2xl sm:text-3xl font-bold font-serif text-slate-900">
-                {pendingInvites.length}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Awaiting account sign up
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 border border-amber-100/60 flex items-center justify-center shrink-0">
-              <Mail className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-
-          {/* Card 4: Expiring Soon */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Expiring Soon
-              </span>
-              <div className="text-2xl sm:text-3xl font-bold font-serif text-slate-900">
-                {expiringSoonCount}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Within next 48 hours
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-rose-50 text-rose-600 border border-rose-100/60 flex items-center justify-center shrink-0">
-              <Clock className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-        </div>
-
         {/* Inline Invite Box */}
         <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
