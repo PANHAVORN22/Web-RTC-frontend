@@ -1,6 +1,6 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  output: process.env.NODE_ENV === "production" ? "standalone" : undefined,
   async rewrites() {
     const backendUrl =
       process.env.BACKEND_INTERNAL_URL ||

@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, Project } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Search,
   Plus,
@@ -26,16 +25,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const router = useRouter();
   const { currentProject, projects, setCurrentProject } = useAuth();
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-    } else if (onOpenCommandPalette) {
-      onOpenCommandPalette();
-    }
-  };
 
   return (
     <>
@@ -54,16 +43,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            <form onSubmit={handleSearchSubmit} className="relative w-full">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search requirements, tasks, documents..."
-                className="w-full h-10 pl-10 pr-4 rounded-xl border border-codex-border bg-white text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent focus:border-transparent placeholder:text-slate-400 transition-all"
-              />
-            </form>
+            <button
+              type="button"
+              onClick={onOpenCommandPalette}
+              className="group relative flex items-center justify-between w-full h-10 pl-10 pr-3 rounded-xl border border-codex-border bg-white text-xs text-slate-400 shadow-xs hover:border-slate-300 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 transition-all text-left cursor-pointer"
+              aria-label="Open command palette and quick search"
+            >
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-hover:text-codex-accent transition-colors shrink-0" />
+              <span className="truncate pr-2">Search tasks, decisions, requirements...</span>
+              <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono font-medium text-slate-400 bg-slate-100 border border-slate-200/80 px-1.5 py-0.5 rounded shadow-2xs group-hover:text-slate-600 group-hover:border-slate-300 transition-all shrink-0">
+                <span className="text-xs leading-none">⌘</span>K
+              </kbd>
+            </button>
           </div>
 
           {/* Right Actions: Project Switcher, Notification Bell & + New */}

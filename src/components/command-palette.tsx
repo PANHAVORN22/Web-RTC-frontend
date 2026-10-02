@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, Project } from "@/context/auth-context";
+import { api } from "@/lib/api";
 import {
   Search,
   LayoutDashboard,
@@ -17,14 +18,22 @@ import {
   Plus,
   ArrowRight,
   X,
+  Loader2,
+  Users,
+  CornerDownLeft,
 } from "lucide-react";
 
 interface PaletteItem {
+  id: string;
   label: string;
+  keyBadge?: string;
   href?: string;
-  icon: any;
+  icon: React.ElementType;
   category: string;
   desc: string;
+  tag?: string;
+  tagColor?: string;
+  iconColorClass?: string;
   action?: () => void;
 }
 
@@ -38,59 +47,413 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const { currentProject, projects, setCurrentProject } = useAuth();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [entityResults, setEntityResults] = useState<any[]>([]);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  const selectedItemRef = useRef<HTMLButtonElement>(null);
+
+  // Reset query and focus input when palette opens
   useEffect(() => {
     if (isOpen) {
       setQuery("");
       setSelectedIndex(0);
+      setEntityResults([]);
+      setIsSearching(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
 
-  // Actions catalog
-  const navigationItems: PaletteItem[] = [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, category: "Navigation", desc: "Overview & progress metrics" },
-    { label: "Requirements", href: "/requirements", icon: FileCheck2, category: "Navigation", desc: "Specifications & criteria" },
-    { label: "Architectural Decisions (ADR)", href: "/decisions", icon: GitPullRequest, category: "Navigation", desc: "Technical decision records" },
-    { label: "Tasks", href: "/tasks", icon: CheckSquare, category: "Navigation", desc: "Action items & due dates" },
-    { label: "Meetings", href: "/meetings", icon: Calendar, category: "Navigation", desc: "Minutes & transcripts" },
-    { label: "Documents", href: "/documents", icon: FileText, category: "Navigation", desc: "File storage & knowledge" },
-    { label: "AI Copilot", href: "/assistant", icon: Sparkles, category: "Navigation", desc: "Chat with workspace citations" },
-    { label: "Universal Search", href: "/search", icon: Search, category: "Navigation", desc: "Multi-entity keyword search" },
-    { label: "Integrations", href: "/integrations", icon: Layers, category: "Navigation", desc: "GitHub issues & external tools" },
-    { label: "Projects / Workspaces", href: "/projects", icon: FolderOpen, category: "Navigation", desc: "Switch or create workspaces" },
-  ];
+  // Debounced API search for workspace records
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed || !currentProject) {
+      setEntityResults([]);
+      setIsSearching(false);
+      return;
+    }
 
-  const quickActions: PaletteItem[] = [
-    { label: "Create Requirement", href: "/requirements?create=true", icon: Plus, category: "Quick Action", desc: "Define new project scope" },
-    { label: "Create Task", href: "/tasks?create=true", icon: Plus, category: "Quick Action", desc: "Add actionable engineering item" },
-    { label: "Log Architectural Decision", href: "/decisions?create=true", icon: Plus, category: "Quick Action", desc: "Record technical ADR" },
-    { label: "Log Meeting", href: "/meetings?create=true", icon: Plus, category: "Quick Action", desc: "Record minutes or transcript" },
-    { label: "Upload Document", href: "/documents", icon: Plus, category: "Quick Action", desc: "Add PDF, DOCX, or Markdown" },
-    { label: "Ask AI Copilot", href: "/assistant", icon: Sparkles, category: "Quick Action", desc: "Ask question about project" },
-  ];
+    setIsSearching(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        const envelope = await api.search.query(
+          currentProject.id,
+          trimmed,
+          undefined,
+          1,
+          8,
+          "hybrid"
+        );
+        setEntityResults(envelope.data || []);
+      } catch (err) {
+        console.error("Command palette entity search failed:", err);
+        setEntityResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 180);
 
-  const projectItems: PaletteItem[] = projects.map((p: Project) => ({
-    label: `Switch to [${p.key}] ${p.name}`,
-    action: () => setCurrentProject(p),
-    href: "/dashboard",
-    icon: FolderOpen,
-    category: "Switch Workspace",
-    desc: p.id === currentProject?.id ? "Currently active workspace" : `Set ${p.key} as active`,
-  }));
+    return () => clearTimeout(timeoutId);
+  }, [query, currentProject]);
 
-  const allItems: PaletteItem[] = [...quickActions, ...navigationItems, ...projectItems];
+  // Reset selected index when query changes
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [query]);
 
-  const filteredItems = allItems.filter((item) => {
-    if (!query.trim()) return true;
+  // Scroll selected item into view smoothly
+  useEffect(() => {
+    if (selectedItemRef.current) {
+      selectedItemRef.current.scrollIntoView({
+        block: "nearest",
+      });
+    }
+  }, [selectedIndex]);
+
+  // Static Action Catalog
+  const quickActions: PaletteItem[] = useMemo(
+    () => [
+      {
+        id: "act-create-task",
+        label: "Create Task",
+        href: "/tasks?create=true",
+        icon: Plus,
+        category: "Quick Actions",
+        desc: "Add an actionable engineering task item",
+        tag: "Action",
+        iconColorClass: "text-emerald-600 bg-emerald-50",
+      },
+      {
+        id: "act-create-req",
+        label: "Create Requirement",
+        href: "/requirements?create=true",
+        icon: Plus,
+        category: "Quick Actions",
+        desc: "Define new project specification & criteria",
+        tag: "Action",
+        iconColorClass: "text-blue-600 bg-blue-50",
+      },
+      {
+        id: "act-create-adr",
+        label: "Log Architectural Decision (ADR)",
+        href: "/decisions?create=true",
+        icon: Plus,
+        category: "Quick Actions",
+        desc: "Record technical rationale, context, and choice",
+        tag: "Action",
+        iconColorClass: "text-purple-600 bg-purple-50",
+      },
+      {
+        id: "act-create-meeting",
+        label: "Log Meeting",
+        href: "/meetings?create=true",
+        icon: Plus,
+        category: "Quick Actions",
+        desc: "Record meeting minutes, transcript, or agenda",
+        tag: "Action",
+        iconColorClass: "text-cyan-600 bg-cyan-50",
+      },
+      {
+        id: "act-upload-doc",
+        label: "Upload Document",
+        href: "/documents?upload=true",
+        icon: Plus,
+        category: "Quick Actions",
+        desc: "Add PDF, Word, Excel, or Markdown file",
+        tag: "Action",
+        iconColorClass: "text-amber-600 bg-amber-50",
+      },
+      {
+        id: "act-ask-copilot",
+        label: "Ask AI Copilot",
+        href: "/assistant",
+        icon: Sparkles,
+        category: "Quick Actions",
+        desc: "Chat with grounding citations across workspace",
+        tag: "AI",
+        iconColorClass: "text-indigo-600 bg-indigo-50",
+      },
+    ],
+    []
+  );
+
+  const navigationItems: PaletteItem[] = useMemo(
+    () => [
+      {
+        id: "nav-dashboard",
+        label: "Dashboard",
+        href: "/dashboard",
+        icon: LayoutDashboard,
+        category: "Navigation",
+        desc: "Overview, metrics, and recent workspace activity",
+      },
+      {
+        id: "nav-requirements",
+        label: "Requirements",
+        href: "/requirements",
+        icon: FileCheck2,
+        category: "Navigation",
+        desc: "Project scope, specifications, and acceptance criteria",
+      },
+      {
+        id: "nav-decisions",
+        label: "Architectural Decisions (ADR)",
+        href: "/decisions",
+        icon: GitPullRequest,
+        category: "Navigation",
+        desc: "Technical records, superseded decisions, and revisions",
+      },
+      {
+        id: "nav-tasks",
+        label: "Tasks Board",
+        href: "/tasks",
+        icon: CheckSquare,
+        category: "Navigation",
+        desc: "Engineering Kanban & list view with due dates",
+      },
+      {
+        id: "nav-meetings",
+        label: "Meetings",
+        href: "/meetings",
+        icon: Calendar,
+        category: "Navigation",
+        desc: "Sync minutes, discussions, and AI action-item proposals",
+      },
+      {
+        id: "nav-documents",
+        label: "Documents",
+        href: "/documents",
+        icon: FileText,
+        category: "Navigation",
+        desc: "Knowledge base files and parsed vector sources",
+      },
+      {
+        id: "nav-assistant",
+        label: "AI Copilot Assistant",
+        href: "/assistant",
+        icon: Sparkles,
+        category: "Navigation",
+        desc: "DeepSeek V4 Pro grounded workspace conversation",
+      },
+      {
+        id: "nav-search",
+        label: "Universal Search",
+        href: "/search",
+        icon: Search,
+        category: "Navigation",
+        desc: "Full faceted keyword, semantic, and hybrid search",
+      },
+      {
+        id: "nav-team",
+        label: "Team & Workspace Members",
+        href: "/team",
+        icon: Users,
+        category: "Navigation",
+        desc: "Manage members, roles, and pending invitations",
+      },
+      {
+        id: "nav-integrations",
+        label: "Integrations & GitHub",
+        href: "/integrations",
+        icon: Layers,
+        category: "Navigation",
+        desc: "GitHub issues sync and third-party tools",
+      },
+      {
+        id: "nav-projects",
+        label: "Workspaces Directory",
+        href: "/projects",
+        icon: FolderOpen,
+        category: "Navigation",
+        desc: "Manage, switch, or create new workspace projects",
+      },
+    ],
+    []
+  );
+
+  const projectItems: PaletteItem[] = useMemo(
+    () =>
+      projects.map((p: Project) => ({
+        id: `switch-proj-${p.id}`,
+        label: `Switch to [${p.key}] ${p.name}`,
+        action: () => setCurrentProject(p),
+        href: "/dashboard",
+        icon: FolderOpen,
+        category: "Switch Workspace",
+        desc:
+          p.id === currentProject?.id
+            ? "Currently active workspace"
+            : `Set active workspace to ${p.key}`,
+        tag: p.id === currentProject?.id ? "Active" : undefined,
+        tagColor:
+          p.id === currentProject?.id
+            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+            : undefined,
+      })),
+    [projects, currentProject, setCurrentProject]
+  );
+
+  // Convert live search results into PaletteItems with same-tab deep links
+  const liveEntityItems: PaletteItem[] = useMemo(() => {
+    return entityResults.map((item: any) => {
+      let icon = FileText;
+      let href = "/dashboard";
+      let iconColorClass = "text-slate-600 bg-slate-100";
+      let tagLabel = item.type || "RECORD";
+      let tagColor = "bg-slate-100 text-slate-700 border-slate-200";
+
+      const searchParam = item.key || item.title;
+
+      switch (item.type) {
+        case "TASK":
+          icon = CheckSquare;
+          href = `/tasks?id=${item.id}&search=${encodeURIComponent(searchParam)}`;
+          iconColorClass = "text-emerald-600 bg-emerald-50";
+          tagLabel = "Task";
+          tagColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
+          break;
+        case "REQUIREMENT":
+          icon = FileCheck2;
+          href = `/requirements?id=${item.id}&search=${encodeURIComponent(searchParam)}`;
+          iconColorClass = "text-blue-600 bg-blue-50";
+          tagLabel = "Requirement";
+          tagColor = "bg-blue-50 text-blue-700 border-blue-200";
+          break;
+        case "DECISION":
+          icon = GitPullRequest;
+          href = `/decisions?id=${item.id}&search=${encodeURIComponent(searchParam)}`;
+          iconColorClass = "text-purple-600 bg-purple-50";
+          tagLabel = "ADR";
+          tagColor = "bg-purple-50 text-purple-700 border-purple-200";
+          break;
+        case "MEETING":
+          icon = Calendar;
+          href = `/meetings?id=${item.id}&search=${encodeURIComponent(item.title)}`;
+          iconColorClass = "text-cyan-600 bg-cyan-50";
+          tagLabel = "Meeting";
+          tagColor = "bg-cyan-50 text-cyan-700 border-cyan-200";
+          break;
+        case "DOCUMENT":
+          icon = FileText;
+          href = `/documents?id=${item.id}&search=${encodeURIComponent(item.title)}`;
+          iconColorClass = "text-amber-600 bg-amber-50";
+          tagLabel = "Document";
+          tagColor = "bg-amber-50 text-amber-700 border-amber-200";
+          break;
+        case "GITHUB_ISSUE":
+          icon = Layers;
+          href = `/integrations?search=${encodeURIComponent(item.title)}`;
+          iconColorClass = "text-slate-700 bg-slate-100";
+          tagLabel = "GitHub";
+          tagColor = "bg-slate-900 text-white border-slate-700";
+          break;
+      }
+
+      return {
+        id: `entity-${item.id}`,
+        label: item.title,
+        keyBadge: item.key || undefined,
+        href,
+        icon,
+        category: "Workspace Records",
+        desc: item.snippet || (item.status ? `Status: ${item.status}` : "Direct workspace record"),
+        tag: tagLabel,
+        tagColor,
+        iconColorClass,
+      };
+    });
+  }, [entityResults]);
+
+  // Filter static actions and navigation based on query
+  const filteredQuickActions = useMemo(() => {
+    if (!query.trim()) return quickActions;
     const q = query.toLowerCase();
-    return (
-      item.label.toLowerCase().includes(q) ||
-      item.category.toLowerCase().includes(q) ||
-      item.desc.toLowerCase().includes(q)
+    return quickActions.filter(
+      (item) =>
+        item.label.toLowerCase().includes(q) ||
+        item.desc.toLowerCase().includes(q)
     );
-  });
+  }, [quickActions, query]);
+
+  const filteredNavigation = useMemo(() => {
+    if (!query.trim()) return navigationItems;
+    const q = query.toLowerCase();
+    return navigationItems.filter(
+      (item) =>
+        item.label.toLowerCase().includes(q) ||
+        item.desc.toLowerCase().includes(q)
+    );
+  }, [navigationItems, query]);
+
+  const filteredProjects = useMemo(() => {
+    if (!query.trim()) return projectItems;
+    const q = query.toLowerCase();
+    return projectItems.filter(
+      (item) =>
+        item.label.toLowerCase().includes(q) ||
+        item.desc.toLowerCase().includes(q)
+    );
+  }, [projectItems, query]);
+
+  // Ordered sections for rendering
+  const sections = useMemo(() => {
+    const list: { title: string; items: PaletteItem[] }[] = [];
+
+    // If query has live entity results, show them at the very top
+    if (liveEntityItems.length > 0) {
+      list.push({ title: "Workspace Records", items: liveEntityItems });
+    }
+
+    if (query.trim()) {
+      // Provide explicit Deep Search in Universal Search action
+      const deepSearchItem: PaletteItem = {
+        id: "deep-search-universal-action",
+        label: `Deep Search for "${query.trim()}" in Universal Search`,
+        href: `/search?q=${encodeURIComponent(query.trim())}`,
+        icon: Search,
+        category: "Deep Search",
+        desc: "Open dedicated full page with Hybrid RRF, Semantic vectors, and faceted category filters",
+        tag: "Shift+↵",
+        tagColor: "bg-blue-50 text-blue-700 border-blue-200",
+        iconColorClass: "text-codex-accent bg-blue-50 border-blue-200",
+      };
+
+      list.push({ title: "Deep Search", items: [deepSearchItem] });
+
+      // When searching, group actions and navigation together
+      const combinedActions = [...filteredQuickActions, ...filteredNavigation];
+      if (combinedActions.length > 0) {
+        list.push({ title: "Actions & Pages", items: combinedActions });
+      }
+      if (filteredProjects.length > 0) {
+        list.push({ title: "Workspaces", items: filteredProjects });
+      }
+    } else {
+      // Default empty query view: Quick Actions, then Navigation, then Switch Workspace
+      if (filteredQuickActions.length > 0) {
+        list.push({ title: "Quick Actions", items: filteredQuickActions });
+      }
+      if (filteredNavigation.length > 0) {
+        list.push({ title: "Navigation", items: filteredNavigation });
+      }
+      if (filteredProjects.length > 0) {
+        list.push({ title: "Switch Workspace", items: filteredProjects });
+      }
+    }
+
+    return list;
+  }, [
+    liveEntityItems,
+    filteredQuickActions,
+    filteredNavigation,
+    filteredProjects,
+    query,
+  ]);
+
+  // Flattened list for unified keyboard arrow navigation
+  const flatItems: PaletteItem[] = useMemo(() => {
+    return sections.flatMap((sec) => sec.items);
+  }, [sections]);
 
   const handleSelect = (item: PaletteItem) => {
     if (item.action) {
@@ -105,134 +468,241 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       onClose();
+    } else if (e.shiftKey && e.key === "Enter" && query.trim()) {
+      e.preventDefault();
+      router.push(`/search?q=${encodeURIComponent(query.trim())}`);
+      onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev + 1) % Math.max(1, filteredItems.length));
+      if (flatItems.length > 0) {
+        setSelectedIndex((prev) => (prev + 1) % flatItems.length);
+      }
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev - 1 + filteredItems.length) % Math.max(1, filteredItems.length));
-    } else if (e.key === "Enter" && filteredItems[selectedIndex]) {
+      if (flatItems.length > 0) {
+        setSelectedIndex((prev) => (prev - 1 + flatItems.length) % flatItems.length);
+      }
+    } else if (e.key === "Enter" && flatItems[selectedIndex]) {
       e.preventDefault();
-      handleSelect(filteredItems[selectedIndex]);
+      handleSelect(flatItems[selectedIndex]);
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center pt-16 sm:pt-24 p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-start justify-center pt-16 sm:pt-24 p-4 animate-in fade-in duration-150">
+      {/* Backdrop click dismiss */}
       <div
         className="fixed inset-0"
         onClick={onClose}
         aria-hidden="true"
       />
+
+      {/* Palette Container */}
       <div
-        className="relative w-full max-w-xl bg-[#0e1015] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[80vh] animate-in zoom-in-95 duration-150"
+        className="relative w-full max-w-2xl bg-white border border-slate-200/90 rounded-2xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[82vh] animate-in zoom-in-95 duration-150 text-slate-800"
         onKeyDown={handleKeyDown}
       >
         {/* Search Header */}
-        <div className="p-3.5 border-b border-white/[0.08] flex items-center gap-3 bg-[#121318]">
-          <Search className="w-4 h-4 text-zinc-400 shrink-0" />
+        <div className="p-3.5 sm:p-4 border-b border-slate-100 flex items-center gap-3 bg-white">
+          {isSearching ? (
+            <Loader2 className="w-4 h-4 text-codex-accent animate-spin shrink-0" />
+          ) : (
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+          )}
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setSelectedIndex(0);
-            }}
-            placeholder="Type a command, page, or search workspace..."
-            className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search tasks, decisions, requirements, documents, or jump to page..."
+            className="w-full bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+            aria-label="Search command palette"
           />
           {query && (
             <button
               onClick={() => setQuery("")}
-              className="p-1 rounded text-zinc-500 hover:text-zinc-300"
+              className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              title="Clear input"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono bg-white/10 px-1.5 py-0.5 rounded text-zinc-400 shrink-0">
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-100 border border-slate-200/80 px-1.5 py-0.5 rounded text-slate-500 shrink-0">
             ESC
           </kbd>
         </div>
 
         {/* Results List */}
-        <div className="flex-1 overflow-y-auto p-2 divide-y divide-white/[0.04]">
-          {filteredItems.length === 0 ? (
-            <div className="py-12 text-center text-xs text-zinc-500 space-y-2">
-              <p>No commands matching &quot;{query}&quot;</p>
-              <button
-                onClick={() => {
-                  router.push(`/search?search=${encodeURIComponent(query)}`);
-                  onClose();
-                }}
-                className="text-indigo-400 hover:underline inline-flex items-center gap-1 font-medium"
-              >
-                <span>Search all workspace content for &quot;{query}&quot;</span>
-                <ArrowRight className="w-3 h-3" />
-              </button>
+        <div
+          ref={selectedItemRef as any}
+          className="flex-1 overflow-y-auto p-2 space-y-4 max-h-[60vh] [scrollbar-width:thin] [scrollbar-color:rgba(0,0,0,0.12)_transparent]"
+        >
+          {flatItems.length === 0 ? (
+            <div className="py-14 text-center px-4 space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                <Search className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-slate-800">
+                  No matches found for &quot;{query}&quot;
+                </p>
+                <p className="text-xs text-slate-400">
+                  Try searching with keywords or open full universal search.
+                </p>
+              </div>
+
+              {query.trim() && (
+                <div className="pt-2 flex items-center justify-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => {
+                      router.push(`/search?search=${encodeURIComponent(query.trim())}`);
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-xs"
+                  >
+                    <span>Search in Universal Search</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      router.push(
+                        `/assistant?prompt=${encodeURIComponent(
+                          `Find information or summarize context for: ${query.trim()}`
+                        )}`
+                      );
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-50 text-codex-accent border border-blue-200 hover:bg-blue-100/60 transition-all shadow-xs"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Ask AI Copilot</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="space-y-0.5">
-              {filteredItems.map((item, idx) => {
-                const Icon = item.icon;
-                const isSelected = idx === selectedIndex;
-                return (
-                  <button
-                    key={`${item.category}-${item.label}-${idx}`}
-                    onClick={() => handleSelect(item)}
-                    onMouseEnter={() => setSelectedIndex(idx)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all ${
-                      isSelected
-                        ? "bg-indigo-600/20 text-white border border-indigo-500/30"
-                        : "text-zinc-300 hover:bg-white/[0.04] border border-transparent"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                          isSelected
-                            ? "bg-indigo-600/30 text-indigo-300"
-                            : "bg-white/[0.04] text-zinc-400"
-                        }`}
-                      >
-                        <Icon className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="truncate min-w-0">
-                        <div className="text-xs font-semibold truncate">{item.label}</div>
-                        <div className="text-[10px] text-zinc-500 truncate">{item.desc}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-wider bg-white/[0.03] px-1.5 py-0.5 rounded">
-                        {item.category}
-                      </span>
-                      {isSelected && (
-                        <ArrowRight className="w-3.5 h-3.5 text-indigo-400" />
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            sections.map((section) => {
+              return (
+                <div key={section.title} className="space-y-1">
+                  <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider select-none">
+                    {section.title}
+                  </div>
+                  <div className="space-y-0.5">
+                    {section.items.map((item) => {
+                      const itemIdx = flatItems.findIndex((fi) => fi.id === item.id);
+                      const isSelected = itemIdx === selectedIndex;
+                      const Icon = item.icon;
+
+                      return (
+                        <button
+                          key={item.id}
+                          ref={isSelected ? selectedItemRef : undefined}
+                          onClick={() => handleSelect(item)}
+                          onMouseEnter={() => setSelectedIndex(itemIdx)}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all ${
+                            isSelected
+                              ? "bg-blue-50/80 text-slate-900 border border-blue-200/80 shadow-2xs"
+                              : "text-slate-700 hover:bg-slate-50 border border-transparent"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div
+                              className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${
+                                item.iconColorClass ||
+                                (isSelected
+                                  ? "bg-blue-100/80 text-blue-700 border-blue-200"
+                                  : "bg-slate-100 text-slate-500 border-slate-200/60")
+                              }`}
+                            >
+                              <Icon className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="truncate min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                {item.keyBadge && (
+                                  <span className="text-[10px] font-mono font-bold text-codex-accent bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100 shrink-0">
+                                    {item.keyBadge}
+                                  </span>
+                                )}
+                                <span className="text-xs font-semibold text-slate-800 truncate">
+                                  {item.label}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                {item.desc}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 ml-3">
+                            {item.tag && (
+                              <span
+                                className={`text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                                  item.tagColor ||
+                                  "bg-slate-100 text-slate-500 border-slate-200"
+                                }`}
+                              >
+                                {item.tag}
+                              </span>
+                            )}
+                            {isSelected ? (
+                              <div className="flex items-center gap-1 text-[10px] text-codex-accent font-mono font-semibold">
+                                <CornerDownLeft className="w-3 h-3" />
+                              </div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
 
-        {/* Footer shortcuts tip */}
-        <div className="p-2.5 bg-[#0a0b0e] border-t border-white/[0.06] text-[10px] text-zinc-500 flex items-center justify-between px-4">
+        {/* Footer info bar */}
+        <div className="p-2.5 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex items-center justify-between px-4 select-none">
           <div className="flex items-center gap-3">
-            <span>
-              <kbd className="font-mono bg-white/10 px-1 py-0.2 rounded text-zinc-400 mr-1">↑↓</kbd>
-              Navigate
+            <span className="flex items-center gap-1">
+              <kbd className="font-mono bg-white border border-slate-200/80 px-1 py-0.5 rounded text-[10px] text-slate-500 shadow-2xs">
+                ↑
+              </kbd>
+              <kbd className="font-mono bg-white border border-slate-200/80 px-1 py-0.5 rounded text-[10px] text-slate-500 shadow-2xs">
+                ↓
+              </kbd>
+              <span className="text-[10px] ml-0.5">navigate</span>
             </span>
-            <span>
-              <kbd className="font-mono bg-white/10 px-1 py-0.2 rounded text-zinc-400 mr-1">↵</kbd>
-              Open
+            <span className="flex items-center gap-1">
+              <kbd className="font-mono bg-white border border-slate-200/80 px-1.5 py-0.5 rounded text-[10px] text-slate-500 shadow-2xs">
+                ↵
+              </kbd>
+              <span className="text-[10px] ml-0.5">open</span>
+            </span>
+            <span className="hidden sm:flex items-center gap-1">
+              <kbd className="font-mono bg-white border border-slate-200/80 px-1.5 py-0.5 rounded text-[10px] text-slate-500 shadow-2xs">
+                shift+↵
+              </kbd>
+              <span className="text-[10px] ml-0.5">deep search</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="font-mono bg-white border border-slate-200/80 px-1 py-0.5 rounded text-[10px] text-slate-500 shadow-2xs">
+                esc
+              </kbd>
+              <span className="text-[10px] ml-0.5">close</span>
             </span>
           </div>
-          <span className="font-mono">
-            {currentProject ? `Active: [${currentProject.key}]` : "No Workspace Selected"}
-          </span>
+
+          <div className="font-mono text-[10px] text-slate-400 truncate max-w-[200px]">
+            {currentProject ? (
+              <span className="text-codex-accent font-semibold">
+                [{currentProject.key}] {currentProject.name}
+              </span>
+            ) : (
+              <span>No workspace selected</span>
+            )}
+          </div>
         </div>
       </div>
     </div>

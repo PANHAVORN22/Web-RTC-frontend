@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
@@ -19,6 +19,8 @@ import {
   GitBranch,
   X,
   LogOut,
+  User,
+  ChevronsUpDown,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -53,6 +55,40 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
       .join("")
       .slice(0, 2)
       .toUpperCase() || "AD";
+
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    if (userMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [userMenuOpen]);
+
+  const roleLabel =
+    user?.systemRole === "ADMIN"
+      ? "Super Admin"
+      : userRole.toUpperCase() === "DEVELOPER"
+      ? "Developer"
+      : userRole.toUpperCase() === "PM"
+      ? "Product Manager"
+      : userRole.toUpperCase() === "QA"
+      ? "QA Engineer"
+      : userRole.toUpperCase() === "INFRASTRUCTURE"
+      ? "Infrastructure"
+      : userRole.toUpperCase() === "DX"
+      ? "UX / DX"
+      : userRole.toUpperCase() === "PRESENTATION"
+      ? "Technical Writer"
+      : userRole;
 
   const navContent = (
     <div className="flex flex-col h-full bg-[#161927] text-white select-none overflow-hidden">
@@ -109,15 +145,75 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
         })}
       </nav>
 
-      {/* User Profile Footer - Anchored at the bottom end */}
-      <div className="p-3 shrink-0 border-t border-white/[0.08] bg-[#161927]">
-        <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.07] transition-all">
+      {/* User Profile Footer - Anchored at the bottom end with Popover Menu */}
+      <div ref={userMenuRef} className="p-3 shrink-0 border-t border-white/[0.08] bg-[#161927] relative">
+        {/* User Menu Popover */}
+        {userMenuOpen && (
+          <div className="absolute bottom-full mb-2 inset-x-3 bg-[#181b2a] border border-white/10 rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-md">
+            {/* User Details Header matching Reference Image 2 */}
+            <div className="px-3 py-2.5">
+              <p className="text-xs font-semibold text-white truncate leading-tight">
+                {displayName}
+              </p>
+              <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                {user?.email || "user@example.com"}
+              </p>
+              <p className="text-[11px] text-slate-300 font-medium mt-1 truncate">
+                Signed in as <span className="text-blue-400 font-semibold">{roleLabel}</span>
+              </p>
+            </div>
+
+            <div className="h-px bg-white/[0.08] my-1" />
+
+            {/* Option 1: View Profile */}
+            <Link
+              href="/profile"
+              onClick={() => {
+                setUserMenuOpen(false);
+                onCloseMobile?.();
+              }}
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-200 hover:text-white hover:bg-white/[0.08] transition-colors group"
+            >
+              <User className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />
+              <span>View Profile</span>
+            </Link>
+
+            <div className="h-px bg-white/[0.08] my-1" />
+
+            {/* Option 2: Sign Out / Exit */}
+            <button
+              onClick={() => {
+                setUserMenuOpen(false);
+                onCloseMobile?.();
+                logout();
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors group text-left cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-rose-400 group-hover:text-rose-300 transition-colors" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        )}
+
+        {/* User Card Trigger (clickable, no separate exit icon) */}
+        <button
+          type="button"
+          onClick={() => setUserMenuOpen((prev) => !prev)}
+          className={cn(
+            "w-full flex items-center justify-between gap-3 p-2.5 rounded-xl border transition-all text-left group cursor-pointer",
+            userMenuOpen
+              ? "bg-white/[0.08] border-white/20 shadow-sm"
+              : "bg-white/[0.04] border-white/[0.08] hover:bg-white/[0.07] hover:border-white/15"
+          )}
+          aria-expanded={userMenuOpen}
+          aria-label="User account menu"
+        >
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-full bg-[#3b82f6] flex items-center justify-center text-xs font-bold text-white shadow-sm shrink-0">
               {initials}
             </div>
             <div className="min-w-0 flex flex-col">
-              <span className="text-xs font-semibold text-white truncate leading-tight">
+              <span className="text-xs font-semibold text-white truncate leading-tight group-hover:text-white">
                 {displayName}
               </span>
               <span className="text-[11px] text-slate-400 truncate leading-tight capitalize mt-0.5">
@@ -126,15 +222,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
             </div>
           </div>
 
-          <button
-            onClick={() => logout()}
-            title="Log out"
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors shrink-0"
-            aria-label="Log out"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
+          <ChevronsUpDown
+            className={cn(
+              "w-4 h-4 text-slate-400 group-hover:text-slate-200 transition-transform duration-150 shrink-0",
+              userMenuOpen && "text-white rotate-180"
+            )}
+          />
+        </button>
       </div>
     </div>
   );

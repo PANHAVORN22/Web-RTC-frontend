@@ -24,6 +24,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, user, router]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   if (isLoading) {
     return (
       <div className="h-screen max-h-screen overflow-hidden flex bg-[#F4F5F7]">
@@ -87,7 +98,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               : "flex-1 px-4 sm:px-8 py-6 overflow-y-auto max-w-7xl w-full mx-auto min-h-0 [scrollbar-width:thin] [scrollbar-color:rgba(0,0,0,0.15)_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
           }
         >
-          {!currentProject && pathname !== "/projects" && pathname !== "/dashboard" && pathname !== "/tasks" ? (
+          {!currentProject && pathname !== "/projects" && pathname !== "/dashboard" && pathname !== "/tasks" && pathname !== "/profile" && pathname !== "/team" ? (
             <div className="flex flex-col items-center justify-center py-20 text-center space-y-5 max-w-md mx-auto">
               <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 text-codex-accent flex items-center justify-center shadow-sm">
                 <FolderKanban className="w-7 h-7" />
