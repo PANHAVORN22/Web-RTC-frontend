@@ -201,6 +201,7 @@ export default function RequirementsPage() {
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
+  const [targetReqId, setTargetReqId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [selectedPriority, setSelectedPriority] = useState<string>("ALL");
@@ -268,9 +269,28 @@ export default function RequirementsPage() {
       if (q) {
         setSearchQuery(q);
       }
+      const targetId = params.get("id") || params.get("reqId");
+      if (targetId) {
+        setTargetReqId(targetId);
+      }
     }
     loadData();
   }, [loadData]);
+
+  // Auto-open inspected requirement modal if id/reqId is in URL
+  useEffect(() => {
+    if (!targetReqId || items.length === 0) return;
+    const found = items.find(
+      (r: any) =>
+        r.id === targetReqId ||
+        r.id?.toLowerCase() === targetReqId.toLowerCase() ||
+        r.displayKey?.toLowerCase() === targetReqId.toLowerCase()
+    );
+    if (found) {
+      openDetailModal(found);
+      setTargetReqId(null);
+    }
+  }, [items, targetReqId]);
 
   // Compute unique active projects
   const activeProjectsList = useMemo(() => {
@@ -342,7 +362,8 @@ export default function RequirementsPage() {
         const matchKey = item.displayKey?.toLowerCase().includes(q);
         const matchProject = item.project?.name.toLowerCase().includes(q);
         const matchUpdater = item.updater?.displayName.toLowerCase().includes(q);
-        if (!matchTitle && !matchDesc && !matchKey && !matchProject && !matchUpdater) {
+        const matchId = item.id.toLowerCase() === q;
+        if (!matchTitle && !matchDesc && !matchKey && !matchProject && !matchUpdater && !matchId) {
           return false;
         }
       }

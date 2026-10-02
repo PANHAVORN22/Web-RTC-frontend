@@ -60,11 +60,17 @@ export async function apiRequestRaw(
     headers["Content-Type"] = "application/json";
   }
 
-  if (csrfToken && ["POST", "PATCH", "PUT", "DELETE"].includes(options.method?.toUpperCase() || "")) {
+  const isMutating = ["POST", "PATCH", "PUT", "DELETE"].includes(options.method?.toUpperCase() || "");
+
+  if (!csrfToken && typeof window !== "undefined") {
+    csrfToken = localStorage.getItem("aiw_csrf_token");
+  }
+
+  if (csrfToken && isMutating) {
     headers["x-csrf-token"] = csrfToken;
   }
 
-  const res = await fetch(url, {
+  let res = await fetch(url, {
     ...options,
     headers,
     credentials: "include",
@@ -73,6 +79,35 @@ export async function apiRequestRaw(
   const newCsrf = res.headers.get("x-csrf-token");
   if (newCsrf) {
     setCsrfToken(newCsrf);
+  }
+
+  // Automatic recovery if CSRF token was invalid/expired
+  if (res.status === 403 && isMutating) {
+    try {
+      const errClone = res.clone();
+      const errJson = await errClone.json();
+      const errCode = errJson?.error?.code || errJson?.code;
+      if (errCode === "CSRF_INVALID") {
+        const csrfRes = await fetch(`${API_URL}/auth/csrf`, { credentials: "include" });
+        const csrfJson = await csrfRes.json();
+        const freshToken = csrfJson.data?.csrfToken;
+        if (freshToken) {
+          setCsrfToken(freshToken);
+          headers["x-csrf-token"] = freshToken;
+          res = await fetch(url, {
+            ...options,
+            headers,
+            credentials: "include",
+          });
+          const retryNewCsrf = res.headers.get("x-csrf-token");
+          if (retryNewCsrf) {
+            setCsrfToken(retryNewCsrf);
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   if (!res.ok) {
@@ -170,6 +205,50 @@ export const api = {
     },
     me: async () => {
       return apiRequest<any>("/auth/me");
+    },
+    updateProfile: async (data: { displayName?: string; professionalRole?: string }) => {
+      return apiRequest<any>("/auth/profile", {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      });
+    },
+    changePassword: async (data: { currentPassword: string; newPassword: string }) => {
+      return apiRequest<any>("/auth/password", {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      });
+    },
+    // Personal Access Tokens (for MCP & Coding Agents)
+    createApiKey: async (data: { name: string; expiresInDays?: number }) => {
+      return apiRequest<{
+        id: string;
+        name: string;
+        keyPrefix: string;
+        lastUsedAt: string | null;
+        expiresAt: string | null;
+        createdAt: string;
+        rawToken?: string;
+      }>("/auth/api-keys", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+    listApiKeys: async () => {
+      return apiRequest<
+        Array<{
+          id: string;
+          name: string;
+          keyPrefix: string;
+          lastUsedAt: string | null;
+          expiresAt: string | null;
+          createdAt: string;
+        }>
+      >("/auth/api-keys");
+    },
+    revokeApiKey: async (id: string) => {
+      return apiRequest<any>(`/auth/api-keys/${id}`, {
+        method: "DELETE",
+      });
     },
   },
 
@@ -318,6 +397,8 @@ export const api = {
       }),
     listRevisions: async (projectId: string, decisionId: string) =>
       apiRequest<any[]>(`/projects/${projectId}/decisions/${decisionId}/revisions`),
+    delete: async (projectId: string, decisionId: string) =>
+      apiRequestRaw(`/projects/${projectId}/decisions/${decisionId}`, { method: "DELETE" }),
   },
 
   tasks: {
@@ -396,6 +477,25 @@ export const api = {
         attendeeUserIds?: string[];
       }
     ) => apiRequest<any>(`/projects/${projectId}/meetings`, { method: "POST", body: JSON.stringify(data) }),
+    update: async (
+      projectId: string,
+      meetingId: string,
+      data: {
+        title?: string;
+        startsAt?: string;
+        endsAt?: string;
+        agenda?: string;
+        notes?: string;
+        transcriptText?: string;
+        attendeeUserIds?: string[];
+      }
+    ) =>
+      apiRequest<any>(`/projects/${projectId}/meetings/${meetingId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    delete: async (projectId: string, meetingId: string) =>
+      apiRequestRaw(`/projects/${projectId}/meetings/${meetingId}`, { method: "DELETE" }),
   },
 
   documents: {
@@ -500,6 +600,10 @@ export const api = {
       ),
     generateTaskProposal: async (projectId: string, requirementId: string) =>
       apiRequest<any>(`/projects/${projectId}/ai/requirements/${requirementId}/task-proposals`, {
+        method: "POST",
+      }),
+    generateDecisionTaskProposal: async (projectId: string, decisionId: string) =>
+      apiRequest<{ proposal: any }>(`/projects/${projectId}/ai/decisions/${decisionId}/task-proposals`, {
         method: "POST",
       }),
     generateMeetingAnalysis: async (projectId: string, meetingId: string) =>

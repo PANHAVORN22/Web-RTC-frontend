@@ -1,80 +1,165 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
+import { ProposalReviewDialog } from "@/components/ai/proposal-review-dialog";
+import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import { api } from "@/lib/api";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Plus,
-  Clock,
-  AlertCircle,
-  GitPullRequest,
   Search,
+  X,
+  GitPullRequest,
+  Sparkles,
   CheckCircle2,
   Copy,
-  Lightbulb,
-  Sparkles,
-  CheckSquare,
-  Bot,
-  FileCheck2,
-  GitCommit,
-  ArrowRight,
   GitMerge,
   History,
-  X,
-  Layers,
+  Bot,
+  FileCheck2,
+  CheckSquare,
+  List,
+  Trash2,
+  AlertCircle,
   ShieldCheck,
+  GitCommit,
+  ArrowRight,
+  ExternalLink,
+  RefreshCw,
+  Layers,
 } from "lucide-react";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
+interface ProjectInfo {
+  id: string;
+  name: string;
+  key: string;
+}
+
+const DECISION_PROJECT_COLORS = [
+  "#C0392B",
+  "#8B5CF6",
+  "#3B82F6",
+  "#059669",
+  "#D97706",
+  "#EC4899",
+  "#6366F1",
+];
+
+const DECISION_STATUS_OPTIONS: FilterOption[] = [
+  { value: "PROPOSED", label: "Proposed", color: "#3B82F6" },
+  { value: "ACCEPTED", label: "Accepted", color: "#10B981" },
+  { value: "SUPERSEDED", label: "Superseded", color: "#94A3B8" },
+];
+
+function getProjectBadgeStyle(projectName?: string | null) {
+  if (!projectName) {
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+  const lower = projectName.toLowerCase();
+  if (lower.includes("ai project") || lower.includes("workspace")) {
+    return "bg-[#eff6ff] text-[#2563eb] border-[#bfdbfe]";
+  }
+  if (lower.includes("onboarding") || lower.includes("revamp") || lower.includes("client")) {
+    return "bg-[#fff7ed] text-[#ea580c] border-[#fed7aa]";
+  }
+  if (lower.includes("style") || lower.includes("guide") || lower.includes("internal")) {
+    return "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]";
+  }
+  return "bg-purple-50 text-purple-700 border-purple-200";
+}
+
+function getStatusDotColor(status: string): string {
+  switch (status) {
+    case "ACCEPTED":
+      return "#10b981"; // green
+    case "PROPOSED":
+      return "#3b82f6"; // blue
+    case "SUPERSEDED":
+    default:
+      return "#94a3b8"; // grey
+  }
+}
+
+function getStatusBadgeStyle(status: string) {
+  switch (status) {
+    case "ACCEPTED":
+      return "bg-[#E8F5E9] text-[#2D8A60] border border-[#2D8A60]/20";
+    case "SUPERSEDED":
+      return "bg-slate-100 text-slate-500 border border-slate-200 line-through";
+    case "PROPOSED":
+    default:
+      return "bg-blue-50 text-[#2563eb] border border-blue-200";
+  }
+}
+
+function formatRelativeTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "-";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHours = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffHours < 1) return diffMin <= 1 ? "Just now" : `${diffMin}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default function DecisionsPage() {
-  const { currentProject } = useAuth();
+  const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
+
   const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [viewMode, setViewMode] = useState<"cards" | "graph">("cards");
-
-  // Search & Filter state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState("ALL");
-
-  // Form state
-  const [title, setTitle] = useState("");
-  const [decisionText, setDecisionText] = useState("");
-  const [rationale, setRationale] = useState("");
-  const [requirementId, setRequirementId] = useState("");
-  const [supersedesDecisionId, setSupersedesDecisionId] = useState("");
   const [requirements, setRequirements] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Filters & Search
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("ALL");
+  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [targetDecId, setTargetDecId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"table" | "graph">("table");
+
+  // Create Modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createProjectId, setCreateProjectId] = useState("");
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDecisionText, setCreateDecisionText] = useState("");
+  const [createRationale, setCreateRationale] = useState("");
+  const [createRequirementId, setCreateRequirementId] = useState("");
+  const [createSupersedesId, setCreateSupersedesId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [createErrorMsg, setCreateErrorMsg] = useState<string | null>(null);
+
+  // Detail / Edit Modal state
+  const [activeDec, setActiveDec] = useState<any | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDecisionText, setEditDecisionText] = useState("");
+  const [editRationale, setEditRationale] = useState("");
+  const [editStatus, setEditStatus] = useState<string>("PROPOSED");
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // Revisions Modal state
   const [revisionsModalDec, setRevisionsModalDec] = useState<any | null>(null);
   const [revisionsList, setRevisionsList] = useState<any[]>([]);
   const [loadingRevisions, setLoadingRevisions] = useState(false);
 
-  const openRevisions = async (dec: any) => {
-    if (!currentProject) return;
-    setRevisionsModalDec(dec);
-    setLoadingRevisions(true);
-    try {
-      const revs = await api.decisions.listRevisions(currentProject.id, dec.id);
-      setRevisionsList(revs || []);
-    } catch (err: any) {
-      showToast(err.message || "Failed to load decision revisions", "error");
-    } finally {
-      setLoadingRevisions(false);
-    }
-  };
+  // AI Task Proposal State
+  const [activeProposal, setActiveProposal] = useState<any>(null);
+  const [generatingProposalDecId, setGeneratingProposalDecId] = useState<string | null>(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!currentProject) return;
     setLoading(true);
     try {
@@ -90,13 +175,13 @@ export default function DecisionsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentProject, showToast]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("create") === "true") {
-        setShowCreate(true);
+        setShowCreateModal(true);
       }
       const q = params.get("search");
       if (q) {
@@ -104,42 +189,146 @@ export default function DecisionsPage() {
       }
       const rId = params.get("reqId");
       if (rId) {
-        setRequirementId(rId);
-        setShowCreate(true);
+        setCreateRequirementId(rId);
+        setShowCreateModal(true);
       }
       const t = params.get("title");
       if (t) {
-        setTitle(t);
+        setCreateTitle(t);
+      }
+      const targetId = params.get("id") || params.get("decId");
+      if (targetId) {
+        setTargetDecId(targetId);
       }
     }
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject]);
+  }, [loadData]);
+
+  // Auto-open inspected decision modal if id/decId is in URL
+  useEffect(() => {
+    if (!targetDecId || items.length === 0) return;
+    const found = items.find(
+      (d: any) =>
+        d.id === targetDecId ||
+        d.id?.toLowerCase() === targetDecId.toLowerCase() ||
+        d.displayKey?.toLowerCase() === targetDecId.toLowerCase()
+    );
+    if (found) {
+      openDetailModal(found);
+      setTargetDecId(null);
+    }
+  }, [items, targetDecId]);
+
+  // Project options for dropdown
+  const activeProjectsList = useMemo(() => {
+    const map = new Map<string, ProjectInfo>();
+    for (const p of projects) {
+      map.set(p.id, { id: p.id, name: p.name, key: p.key });
+    }
+    for (const item of items) {
+      if (item.project) {
+        map.set(item.project.id, item.project);
+      }
+    }
+    return Array.from(map.values());
+  }, [projects, items]);
+
+  const decisionProjectOptions: FilterOption[] = useMemo(() => {
+    return activeProjectsList.map((p, idx) => ({
+      value: p.id,
+      label: p.name,
+      color: DECISION_PROJECT_COLORS[idx % DECISION_PROJECT_COLORS.length],
+    }));
+  }, [activeProjectsList]);
+
+  // Status Counts for summary pills
+  const statusCounts = useMemo(() => {
+    let proposed = 0;
+    let accepted = 0;
+    let superseded = 0;
+    for (const item of items) {
+      if (item.status === "PROPOSED") proposed++;
+      else if (item.status === "ACCEPTED") accepted++;
+      else if (item.status === "SUPERSEDED") superseded++;
+    }
+    return { PROPOSED: proposed, ACCEPTED: accepted, SUPERSEDED: superseded };
+  }, [items]);
+
+  // Filtered decisions list
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Project filter
+      if (selectedProjectId !== "ALL" && item.projectId !== selectedProjectId) {
+        return false;
+      }
+      // Status filter
+      if (selectedStatus !== "ALL" && item.status !== selectedStatus) {
+        return false;
+      }
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchTitle = (item.title || "").toLowerCase().includes(q);
+        const matchKey = (item.displayKey || "").toLowerCase().includes(q);
+        const matchText = (item.decisionText || "").toLowerCase().includes(q);
+        const matchRationale = (item.rationale || "").toLowerCase().includes(q);
+        const matchId = (item.id || "").toLowerCase() === q;
+        if (!matchTitle && !matchKey && !matchText && !matchRationale && !matchId) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [items, selectedProjectId, selectedStatus, searchQuery]);
+
+  const filteredProjectsCount = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of filteredItems) {
+      if (item.projectId) set.add(item.projectId);
+    }
+    return set.size || (activeProjectsList.length > 0 ? activeProjectsList.length : 1);
+  }, [filteredItems, activeProjectsList]);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     showToast(`Copied ${label} to clipboard!`, "info");
   };
 
+  // Open Create Modal
+  const openCreateModal = () => {
+    setCreateProjectId(
+      selectedProjectId !== "ALL"
+        ? selectedProjectId
+        : currentProject?.id || activeProjectsList[0]?.id || ""
+    );
+    setCreateTitle("");
+    setCreateDecisionText("");
+    setCreateRationale("");
+    setCreateRequirementId("");
+    setCreateSupersedesId("");
+    setCreateErrorMsg(null);
+    setShowCreateModal(true);
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentProject || !title.trim() || !decisionText.trim()) return;
+    const targetProjId = createProjectId || currentProject?.id;
+    if (!targetProjId || !createTitle.trim() || !createDecisionText.trim()) {
+      setCreateErrorMsg("Please provide a title and decision outcome.");
+      return;
+    }
     setSubmitting(true);
-    setErrorMsg(null);
+    setCreateErrorMsg(null);
     try {
-      const created = await api.decisions.create(currentProject.id, {
-        title: title.trim(),
-        decisionText: decisionText.trim(),
-        rationale: rationale.trim() || undefined,
-        requirementId: requirementId ? requirementId : undefined,
-        supersedesDecisionId: supersedesDecisionId ? supersedesDecisionId : undefined,
+      const created = await api.decisions.create(targetProjId, {
+        title: createTitle.trim(),
+        decisionText: createDecisionText.trim(),
+        rationale: createRationale.trim() || undefined,
+        requirementId: createRequirementId || undefined,
+        supersedesDecisionId: createSupersedesId || undefined,
       });
-      setTitle("");
-      setDecisionText("");
-      setRationale("");
-      setRequirementId("");
-      setSupersedesDecisionId("");
-      setShowCreate(false);
+
+      setShowCreateModal(false);
       showToast(`Created ${created.displayKey || "decision"} successfully!`, "success");
       await loadData();
     } catch (err: any) {
@@ -151,44 +340,92 @@ export default function DecisionsPage() {
       const friendlyMsg = isCycle
         ? "Circular supersession detected! A decision cannot supersede itself or form an indirect loop."
         : rawMsg;
-      setErrorMsg(friendlyMsg);
+      setCreateErrorMsg(friendlyMsg);
       showToast(friendlyMsg, "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const updateStatus = async (dec: any, newStatus: string) => {
-    if (!currentProject) return;
+  // Open Detail / Edit Modal
+  const openDetailModal = (dec: any) => {
+    setActiveDec(dec);
+    setEditTitle(dec.title || "");
+    setEditDecisionText(dec.decisionText || "");
+    setEditRationale(dec.rationale || "");
+    setEditStatus(dec.status || "PROPOSED");
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeDec || !editTitle.trim()) return;
+    setEditSubmitting(true);
     try {
-      await api.decisions.update(currentProject.id, dec.id, {
-        version: dec.version,
-        status: newStatus,
+      await api.decisions.update(activeDec.projectId || currentProject?.id, activeDec.id, {
+        version: activeDec.version,
+        title: editTitle.trim(),
+        decisionText: editDecisionText.trim() || undefined,
+        rationale: editRationale.trim() || undefined,
+        status: editStatus,
       });
-      showToast(`${dec.displayKey} updated to ${newStatus}`, "success");
+      showToast("Decision updated successfully", "success");
+      setActiveDec(null);
       await loadData();
     } catch (err: any) {
-      showToast(err.message || "Failed to update decision status", "error");
+      showToast(err.message || "Failed to update decision", "error");
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
-  const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      const q = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        q === "" ||
-        item.id.toLowerCase() === q ||
-        item.title.toLowerCase().includes(q) ||
-        (item.displayKey && item.displayKey.toLowerCase().includes(q)) ||
-        (item.decisionText && item.decisionText.toLowerCase().includes(q)) ||
-        (item.rationale && item.rationale.toLowerCase().includes(q));
+  const handleDelete = async () => {
+    if (!activeDec) return;
+    if (!confirm(`Are you sure you want to delete decision "${activeDec.title}"?`)) return;
+    setEditSubmitting(true);
+    try {
+      await api.decisions.delete(activeDec.projectId || currentProject?.id, activeDec.id);
+      showToast("Decision deleted", "success");
+      setActiveDec(null);
+      await loadData();
+    } catch (err: any) {
+      showToast(err.message || "Failed to delete decision", "error");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
 
-      const matchesStatus =
-        selectedStatus === "ALL" || item.status === selectedStatus;
+  // AI Task Generation from Decision
+  const handleGenerateTasksFromDecision = async (dec: any) => {
+    const projId = dec.projectId || currentProject?.id;
+    if (!projId) return;
+    setGeneratingProposalDecId(dec.id);
+    try {
+      const res = await api.ai.generateDecisionTaskProposal(projId, dec.id);
+      setActiveProposal(res.proposal || res);
+      showToast(`Generated implementation tasks for ADR ${dec.displayKey || dec.title}! Review before confirming.`, "info");
+    } catch (err: any) {
+      console.error("Failed to generate task proposal from decision", err);
+      showToast(err.message || "Failed to generate tasks from decision", "error");
+    } finally {
+      setGeneratingProposalDecId(null);
+    }
+  };
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [items, searchQuery, selectedStatus]);
+  // Revisions Modal
+  const openRevisions = async (dec: any) => {
+    const projId = dec.projectId || currentProject?.id;
+    if (!projId) return;
+    setRevisionsModalDec(dec);
+    setLoadingRevisions(true);
+    try {
+      const revs = await api.decisions.listRevisions(projId, dec.id);
+      setRevisionsList(revs || []);
+    } catch (err: any) {
+      showToast(err.message || "Failed to load decision revisions", "error");
+    } finally {
+      setLoadingRevisions(false);
+    }
+  };
 
   // Supersession Graph computation
   const graphData = useMemo(() => {
@@ -234,288 +471,180 @@ export default function DecisionsPage() {
       (item) => !item.supersedesDecisionId && (supersededByMap.get(item.id) || []).length === 0
     );
 
-    return { chains, standalone, supersededByMap };
+    return { chains, standalone };
   }, [items]);
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "ACCEPTED":
-        return <Badge variant="ontrack" className="text-[10px]">ACCEPTED</Badge>;
-      case "SUPERSEDED":
-        return <Badge className="bg-slate-100 text-slate-500 border border-slate-200 line-through text-[10px]">SUPERSEDED</Badge>;
-      default:
-        return <Badge className="bg-blue-50 text-codex-accent border border-blue-100 text-[10px]">PROPOSED</Badge>;
-    }
-  };
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-6xl mx-auto pb-10">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-codex-border pb-4">
+      <div className="space-y-5 max-w-7xl mx-auto pb-12">
+        {/* Top Breadcrumb & Header */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center border border-blue-100">
-                <GitPullRequest className="w-4 h-4" />
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-codex-text font-serif">
-                Decisions (ADR)
-              </h1>
-            </div>
-            <p className="text-xs text-codex-muted mt-1">
-              Document critical technical decisions, context, and rationale to maintain architectural integrity.
+            <nav className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+              <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
+                Dashboard
+              </Link>
+              <span>/</span>
+              <span className="text-slate-800 font-medium">Decisions</span>
+            </nav>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
+              Decisions
+            </h1>
+            <p className="text-xs text-slate-500 mt-1">
+              {filteredItems.length} architectural decision{filteredItems.length === 1 ? "" : "s"} across{" "}
+              {filteredProjectsCount} active {filteredProjectsCount === 1 ? "project" : "projects"}.
             </p>
+
+            {/* Status Summary Pills (Matching Requirements & Tasks page!) */}
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => setSelectedStatus(selectedStatus === "PROPOSED" ? "ALL" : "PROPOSED")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  selectedStatus === "PROPOSED"
+                    ? "bg-blue-50 text-blue-900 border-blue-400 ring-1 ring-blue-400 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#3b82f6]" />
+                <span>Proposed {statusCounts.PROPOSED}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedStatus(selectedStatus === "ACCEPTED" ? "ALL" : "ACCEPTED")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  selectedStatus === "ACCEPTED"
+                    ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#10b981]" />
+                <span>Accepted {statusCounts.ACCEPTED}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedStatus(selectedStatus === "SUPERSEDED" ? "ALL" : "SUPERSEDED")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+                  selectedStatus === "SUPERSEDED"
+                    ? "bg-slate-100 text-slate-900 border-slate-400 ring-1 ring-slate-400 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#94a3b8]" />
+                <span>Superseded {statusCounts.SUPERSEDED}</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <Link href="/requirements">
-              <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5">
-                <FileCheck2 className="w-3.5 h-3.5 text-codex-accent" />
-                <span>Requirements</span>
-              </Button>
-            </Link>
-            <Button
-              size="sm"
-              onClick={() => setShowCreate(!showCreate)}
-              className="gap-1.5 text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-sm h-9"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{showCreate ? "Close Form" : "Log Decision"}</span>
-            </Button>
-          </div>
+
+          <Button
+            onClick={openCreateModal}
+            className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm flex items-center gap-1.5 self-start sm:self-auto h-9"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>New Decision</span>
+          </Button>
         </div>
 
-        {/* Create ADR Card */}
-        {showCreate && (
-          <Card className="border-codex-accent/30 shadow-xl animate-in fade-in slide-in-from-top-2">
-            <CardHeader className="pb-3 border-b border-codex-border">
-              <CardTitle className="text-sm font-bold text-codex-text flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-codex-accent" />
-                <span>Log New Architectural Decision Record (ADR)</span>
-              </CardTitle>
-            </CardHeader>
-            <form onSubmit={handleCreate}>
-              <div className="p-5 space-y-4">
-                {errorMsg && (
-                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-codex-warning text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
+        {/* Filter Toolbar & View Switcher */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
+          {/* Left: Dropdown Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Project Filter */}
+            <FilterDropdown
+              label="Project"
+              allLabel="All projects"
+              value={selectedProjectId}
+              onChange={setSelectedProjectId}
+              options={decisionProjectOptions}
+            />
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Decision Title *</label>
-                  <Input
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g., Adopt Argon2id for User Password Hashing"
-                  />
-                </div>
+            {/* Status Filter */}
+            <FilterDropdown
+              label="Status"
+              allLabel="All statuses"
+              value={selectedStatus}
+              onChange={setSelectedStatus}
+              options={DECISION_STATUS_OPTIONS}
+            />
+          </div>
 
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Link Scope Requirement (Optional)</label>
-                    <span className="text-[10px] text-slate-400">Connect to product requirements</span>
-                  </div>
-                  <select
-                    value={requirementId}
-                    onChange={(e) => setRequirementId(e.target.value)}
-                    className="w-full rounded-lg bg-white border border-codex-border p-2 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-                  >
-                    <option value="">-- None (Standalone Architecture Decision) --</option>
-                    {requirements.map((req) => (
-                      <option key={req.id} value={req.id}>
-                        {req.displayKey ? `[${req.displayKey}] ` : ""}{req.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Supersedes Existing Decision (Optional)</label>
-                    <span className="text-[10px] text-amber-600 font-medium">Replaces previous architecture ADR</span>
-                  </div>
-                  <select
-                    value={supersedesDecisionId}
-                    onChange={(e) => setSupersedesDecisionId(e.target.value)}
-                    className="w-full rounded-lg bg-white border border-codex-border p-2 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent cursor-pointer"
-                  >
-                    <option value="">-- None (Initial or independent baseline) --</option>
-                    {items.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.displayKey ? `[${item.displayKey}] ` : ""}{item.title} ({item.status})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Decision Outcome *</label>
-                    <span className="text-[10px] text-slate-400">What is the technical choice being made?</span>
-                  </div>
-                  <textarea
-                    required
-                    rows={3}
-                    value={decisionText}
-                    onChange={(e) => setDecisionText(e.target.value)}
-                    placeholder="e.g., All user passwords will be hashed using Argon2id with memory cost 64MB and 3 iterations, stored securely in PostgreSQL."
-                    className="w-full rounded-lg bg-white border border-codex-border p-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Rationale & Context</label>
-                    <span className="text-[10px] text-slate-400">Why was this option chosen over alternatives?</span>
-                  </div>
-                  <textarea
-                    rows={3}
-                    value={rationale}
-                    onChange={(e) => setRationale(e.target.value)}
-                    placeholder="e.g., Argon2id won the Password Hashing Competition and provides superior resistance against GPU/ASIC attacks compared to bcrypt and scrypt."
-                    className="w-full rounded-lg bg-white border border-codex-border p-2.5 text-xs text-codex-text shadow-sm focus:outline-none focus:ring-2 focus:ring-codex-accent"
-                  />
-                </div>
-              </div>
-
-              <div className="p-4 bg-slate-50 border-t border-codex-border flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowCreate(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={submitting}
-                  className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
-                >
-                  {submitting ? "Saving..." : "Save Decision"}
-                </Button>
-              </div>
-            </form>
-          </Card>
-        )}
-
-        {/* View Mode Toggle & Filter Tabs */}
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="inline-flex items-center p-1 bg-white border border-slate-200 rounded-xl shadow-xs gap-1">
-                <button
-                  type="button"
-                  onClick={() => setSelectedStatus("ALL")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                    selectedStatus === "ALL"
-                      ? "bg-[#161927] text-white shadow-xs"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  All ({items.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedStatus("PROPOSED")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                    selectedStatus === "PROPOSED"
-                      ? "bg-[#161927] text-white shadow-xs"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Proposed ({items.filter((i) => i.status === "PROPOSED").length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedStatus("ACCEPTED")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                    selectedStatus === "ACCEPTED"
-                      ? "bg-[#161927] text-white shadow-xs"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Accepted ({items.filter((i) => i.status === "ACCEPTED").length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedStatus("SUPERSEDED")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                    selectedStatus === "SUPERSEDED"
-                      ? "bg-[#161927] text-white shadow-xs"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Superseded ({items.filter((i) => i.status === "SUPERSEDED").length})
-                </button>
-              </div>
-
-              {/* View Mode Toggle */}
-              <div className="inline-flex items-center p-1 bg-slate-100/90 border border-slate-200 rounded-xl shadow-xs gap-1">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("cards")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-                    viewMode === "cards"
-                      ? "bg-white text-slate-900 shadow-xs font-semibold"
-                      : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Card View</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("graph")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-                    viewMode === "graph"
-                      ? "bg-[#161927] text-white shadow-xs font-semibold"
-                      : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  <GitMerge className="w-3.5 h-3.5" />
-                  <span>Supersession Graph</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="relative w-full sm:w-72">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+          {/* Right: Search Filter & View Switcher */}
+          <div className="flex items-center gap-2.5">
+            <div className="relative flex-1 md:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search decisions by title or key..."
-                className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent focus:border-codex-accent shadow-xs"
+                placeholder="Filter decisions..."
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* List / Graph Switcher */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/80 shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  viewMode === "table"
+                    ? "bg-[#0f172a] text-white shadow-xs font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>List</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("graph")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  viewMode === "graph"
+                    ? "bg-[#0f172a] text-white shadow-xs font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <GitMerge className="w-3.5 h-3.5 text-blue-400" />
+                <span>Graph</span>
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Loading State */}
+        {/* Content Area: Table / Graph View */}
         {loading ? (
-          <div className="space-y-3">
-            <div className="h-28 rounded-2xl bg-white animate-pulse border border-slate-200" />
-            <div className="h-28 rounded-2xl bg-white animate-pulse border border-slate-200" />
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-2xs space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+            ))}
           </div>
         ) : filteredItems.length === 0 ? (
-          <div className="text-center py-16 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center mx-auto border border-blue-100">
-              <GitPullRequest className="w-5 h-5" />
+          <div className="text-center py-20 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3 shadow-2xs">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
+              <GitPullRequest className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-semibold text-slate-900 font-serif">
-              {items.length === 0 ? "No Decisions Documented Yet" : "No Matching Decisions Found"}
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-900">No matching decisions found</h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
               {items.length === 0
-                ? "Keep track of foundational architectural decisions so your team stays aligned."
-                : "Try adjusting your search keywords or switching status tabs."}
+                ? "No architectural decisions recorded yet. Log your first ADR to keep everyone aligned."
+                : "Try adjusting your project or status filters, or clear your search term."}
             </p>
             {items.length === 0 ? (
-              <Button size="sm" onClick={() => setShowCreate(true)} className="text-xs bg-codex-accent hover:bg-codex-hover text-white">
+              <Button
+                onClick={openCreateModal}
+                className="text-xs bg-[#2563eb] hover:bg-[#1d4ed8] text-white mt-2"
+              >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Log First Decision
               </Button>
             ) : (
@@ -523,21 +652,21 @@ export default function DecisionsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setSearchQuery("");
+                  setSelectedProjectId("ALL");
                   setSelectedStatus("ALL");
+                  setSearchQuery("");
                 }}
-                className="text-xs"
+                className="text-xs mt-2"
               >
-                Clear Filters
+                Reset Filters
               </Button>
             )}
           </div>
         ) : viewMode === "graph" ? (
-          /* Visual Supersession DAG Graph View */
+          /* DAG Graph View */
           <div className="space-y-6 animate-in fade-in duration-200">
-            {/* DAG Explainer Banner */}
             <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-slate-50 border border-blue-100/80 flex items-start gap-3.5 shadow-xs">
-              <div className="w-8 h-8 rounded-xl bg-codex-accent text-white flex items-center justify-center shrink-0 shadow-xs">
+              <div className="w-8 h-8 rounded-xl bg-[#2563eb] text-white flex items-center justify-center shrink-0 shadow-xs">
                 <GitMerge className="w-4 h-4" />
               </div>
               <div className="flex-1">
@@ -545,9 +674,10 @@ export default function DecisionsPage() {
                   <h3 className="text-xs font-bold text-slate-900 font-serif">
                     Architectural Supersession DAG (Directed Acyclic Graph)
                   </h3>
-                  <Badge className="bg-blue-100 text-blue-800 border-blue-200 text-[10px]">
-                    <ShieldCheck className="w-3 h-3 mr-1 inline" /> Kahn&apos;s Cycle Verified
-                  </Badge>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>Kahn&apos;s Cycle Verified</span>
+                  </span>
                 </div>
                 <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
                   Decisions evolve over time. When an architecture changes, new ADRs supersede older ones, retiring previous choices while maintaining an immutable historical chain.
@@ -555,11 +685,10 @@ export default function DecisionsPage() {
               </div>
             </div>
 
-            {/* Evolution Lineages */}
             {graphData.chains.length > 0 && (
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <GitCommit className="w-4 h-4 text-codex-accent" />
+                  <GitCommit className="w-4 h-4 text-blue-600" />
                   <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-mono">
                     Supersession Evolution Chains ({graphData.chains.length})
                   </h3>
@@ -567,7 +696,7 @@ export default function DecisionsPage() {
 
                 <div className="space-y-4">
                   {graphData.chains.map((chain, cIdx) => (
-                    <Card key={cIdx} className="bg-white border-slate-200 shadow-xs overflow-hidden">
+                    <div key={cIdx} className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
                       <div className="bg-slate-50/80 px-4 py-2 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
                         <span className="font-semibold text-slate-700">Evolution Path #{cIdx + 1}</span>
                         <span>{chain.length} Decision Generations</span>
@@ -579,46 +708,43 @@ export default function DecisionsPage() {
                             return (
                               <React.Fragment key={stepNode.id}>
                                 <div
-                                  className={`w-72 p-4 rounded-xl border transition-all ${
+                                  onClick={() => openDetailModal(stepNode)}
+                                  className={`w-72 p-4 rounded-xl border transition-all cursor-pointer ${
                                     isLatest
-                                      ? "bg-blue-50/40 border-codex-accent/60 shadow-sm ring-1 ring-codex-accent/20"
+                                      ? "bg-blue-50/40 border-blue-400 shadow-xs ring-1 ring-blue-400/20"
                                       : "bg-slate-50/70 border-slate-200 opacity-80 hover:opacity-100"
                                   }`}
                                 >
                                   <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-200/60">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="font-mono text-xs font-bold text-codex-accent">
+                                      <span className="font-mono text-xs font-bold text-blue-600">
                                         {stepNode.displayKey}
                                       </span>
                                       <span className="text-[10px] text-slate-400 font-mono">
                                         v{stepNode.version}
                                       </span>
                                     </div>
-                                    {getStatusBadge(stepNode.status)}
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadgeStyle(stepNode.status)}`}>
+                                      {stepNode.status}
+                                    </span>
                                   </div>
 
                                   <h4 className="text-xs font-bold text-slate-900 font-serif line-clamp-1 mb-1.5" title={stepNode.title}>
                                     {stepNode.title}
                                   </h4>
-                                  <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed bg-white p-2 rounded border border-slate-100 mb-3">
+                                  <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed bg-white p-2 rounded-lg border border-slate-100 mb-3">
                                     {stepNode.decisionText}
                                   </p>
 
                                   <div className="flex items-center justify-between pt-1 text-[10px] text-slate-400">
                                     <span>{formatDate(stepNode.createdAt)}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => openRevisions(stepNode)}
-                                      className="text-codex-accent hover:underline flex items-center gap-1 font-mono font-medium"
-                                    >
-                                      <History className="w-3 h-3" /> Revisions
-                                    </button>
+                                    <span className="text-blue-600 font-medium">Click for details →</span>
                                   </div>
                                 </div>
 
                                 {!isLatest && (
                                   <div className="flex flex-col items-center justify-center px-1 text-slate-400">
-                                    <ArrowRight className="w-5 h-5 text-codex-accent" />
+                                    <ArrowRight className="w-5 h-5 text-blue-600" />
                                     <span className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter">
                                       superseded by
                                     </span>
@@ -629,7 +755,7 @@ export default function DecisionsPage() {
                           })}
                         </div>
                       </div>
-                    </Card>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -651,234 +777,482 @@ export default function DecisionsPage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {graphData.standalone.map((item: any) => (
-                    <Card key={item.id} className="bg-white border-slate-200 shadow-xs p-4 space-y-2 hover:shadow-sm transition-all">
+                    <div
+                      key={item.id}
+                      onClick={() => openDetailModal(item)}
+                      className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 space-y-2.5 hover:border-slate-300 transition-all cursor-pointer"
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-codex-accent bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                          <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100">
                             {item.displayKey}
                           </span>
-                          {getStatusBadge(item.status)}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadgeStyle(item.status)}`}>
+                            {item.status}
+                          </span>
                           <span className="text-[10px] text-slate-400 font-mono">v{item.version}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => openRevisions(item)}
-                          className="text-slate-400 hover:text-slate-700 p-1 rounded"
-                          title="View Revisions"
-                        >
-                          <History className="w-3.5 h-3.5 text-codex-accent" />
-                        </button>
+                        <span className="text-[10px] text-slate-400">{formatDate(item.createdAt)}</span>
                       </div>
 
                       <h4 className="text-xs font-bold text-slate-900 font-serif">{item.title}</h4>
-                      <p className="text-[11px] text-slate-600 line-clamp-2 bg-slate-50 p-2 rounded border border-slate-100">
+                      <p className="text-[11px] text-slate-600 line-clamp-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100 leading-relaxed">
                         {item.decisionText}
                       </p>
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px] text-slate-400">
-                        <span>Logged {formatDate(item.createdAt)}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSupersedesDecisionId(item.id);
-                            setShowCreate(true);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
-                          }}
-                          className="text-codex-accent hover:underline font-medium font-mono"
-                        >
-                          + Supersede this ADR
-                        </button>
-                      </div>
-                    </Card>
+                    </div>
                   ))}
                 </div>
               )}
             </div>
           </div>
         ) : (
-          /* Cards View */
-          <div className="space-y-4">
-            {filteredItems.map((dec) => {
-              const isSearchMatch =
-                searchQuery.trim() !== "" &&
-                (dec.displayKey?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  dec.title?.toLowerCase().includes(searchQuery.toLowerCase()));
+          /* Table View (Matching Requirements page table exactly!) */
+          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3 px-4 w-[42%]">Decision (ADR)</th>
+                    <th className="py-3 px-4 w-[16%]">Project</th>
+                    <th className="py-3 px-4 w-[14%]">Status</th>
+                    <th className="py-3 px-4 w-[16%]">Traceability</th>
+                    <th className="py-3 px-4 w-[12%]">Updated</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {filteredItems.map((dec) => {
+                    const projectName = dec.project?.name || currentProject?.name || "AI Workspace";
+                    const projectBadgeStyle = getProjectBadgeStyle(projectName);
+                    const dotColor = getStatusDotColor(dec.status);
+                    const relativeTime = formatRelativeTime(dec.updatedAt || dec.createdAt);
+                    const linkedReq = dec.requirement || requirements.find((r) => r.id === dec.requirementId);
+                    const predecessor = items.find((i) => i.id === dec.supersedesDecisionId);
 
-              const linkedReq = dec.requirement || requirements.find((r) => r.id === dec.requirementId);
-              const predecessor = items.find((i) => i.id === dec.supersedesDecisionId);
-              const successor = items.find((i) => i.supersedesDecisionId === dec.id);
+                    return (
+                      <tr
+                        key={dec.id}
+                        onClick={() => openDetailModal(dec)}
+                        className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                      >
+                        {/* Title & Outcome snippet */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-start gap-2.5">
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0 mt-1.5"
+                              style={{ backgroundColor: dotColor }}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono text-[11px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                  {dec.displayKey || dec.id.slice(0, 8)}
+                                </span>
+                                <span className="font-medium text-slate-800 group-hover:text-blue-600 transition-colors">
+                                  {dec.title}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5 font-normal">
+                                {dec.decisionText}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
 
-              return (
-                <Card
-                  key={dec.id}
-                  className={`bg-white border transition-all duration-150 shadow-xs hover:shadow-md ${
-                    isSearchMatch ? "border-codex-accent ring-1 ring-codex-accent/40" : "border-slate-200"
-                  }`}
-                >
-                  <CardHeader className="p-5 pb-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button
-                          onClick={() => copyToClipboard(dec.displayKey || dec.id, "decision key")}
-                          className="flex items-center gap-1 font-mono text-xs font-bold text-codex-accent bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-100 transition-all group"
-                          title="Click to copy key"
-                        >
-                          <span>{dec.displayKey || dec.id.substring(0, 8)}</span>
-                          <Copy className="w-3 h-3 text-codex-accent/60 group-hover:text-codex-accent" />
-                        </button>
-                        {getStatusBadge(dec.status)}
-                        <span className="text-[10px] text-slate-400 font-mono">Rev: v{dec.version}</span>
-                        {predecessor && (
+                        {/* Project */}
+                        <td className="py-3 px-4">
                           <span
-                            className="inline-flex items-center gap-1 text-[10px] font-mono text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded"
-                            title={`Supersedes previous decision ${predecessor.displayKey}: ${predecessor.title}`}
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[150px] ${projectBadgeStyle}`}
                           >
-                            <GitMerge className="w-3 h-3 text-amber-600" />
-                            <span>Supersedes: {predecessor.displayKey}</span>
+                            {projectName}
                           </span>
-                        )}
-                        {linkedReq && (
-                          <Link
-                            href={`/requirements?search=${encodeURIComponent(linkedReq.displayKey || linkedReq.id)}`}
-                            className="inline-flex items-center gap-1 text-[10px] font-mono text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded hover:bg-blue-100 transition-all"
-                            title="View linked requirement"
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-medium ${getStatusBadgeStyle(
+                              dec.status
+                            )}`}
                           >
-                            <FileCheck2 className="w-3 h-3 text-blue-600" />
-                            <span>Req: {linkedReq.displayKey || linkedReq.title}</span>
-                          </Link>
-                        )}
-                      </div>
-
-                      {/* Status switcher */}
-                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
-                        <span className="text-[11px] text-slate-400 font-medium">Status:</span>
-                        <select
-                          value={dec.status}
-                          onChange={(e) => updateStatus(dec, e.target.value)}
-                          className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent cursor-pointer shadow-2xs"
-                        >
-                          <option value="PROPOSED">PROPOSED</option>
-                          <option value="ACCEPTED">ACCEPTED</option>
-                          <option value="SUPERSEDED">SUPERSEDED</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <CardTitle className="text-base font-bold text-slate-900 font-serif pt-2 leading-snug">
-                      {dec.title}
-                    </CardTitle>
-                  </CardHeader>
-
-                  <CardContent className="p-5 pt-1 space-y-3">
-                    {/* Superseded Warning Banner if replaced by another ADR */}
-                    {successor && (
-                      <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>
-                            This architecture has been superseded by <strong>{successor.displayKey}</strong>: {successor.title}
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
+                            <span>{dec.status}</span>
                           </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setSearchQuery(successor.displayKey || successor.id)}
-                          className="text-[11px] underline font-medium text-amber-800 hover:text-amber-950 shrink-0"
-                        >
-                          View replacement
-                        </button>
-                      </div>
-                    )}
+                        </td>
 
-                    <div className="space-y-1.5">
-                      <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#2D8A60]" /> Decision Outcome
-                      </div>
-                      <p className="text-xs text-slate-800 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                        {dec.decisionText}
-                      </p>
-                    </div>
+                        {/* Traceability: Predecessor / Linked REQ */}
+                        <td className="py-3 px-4">
+                          <div className="flex flex-col gap-1 text-[11px] font-mono">
+                            {predecessor && (
+                              <span className="text-amber-700 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded inline-flex items-center gap-1 truncate max-w-[150px]">
+                                <GitMerge className="w-3 h-3 text-amber-600 shrink-0" />
+                                <span>Supersedes: {predecessor.displayKey}</span>
+                              </span>
+                            )}
+                            {linkedReq && (
+                              <span className="text-blue-700 bg-blue-50 border border-blue-200/80 px-1.5 py-0.5 rounded inline-flex items-center gap-1 truncate max-w-[150px]">
+                                <FileCheck2 className="w-3 h-3 text-blue-600 shrink-0" />
+                                <span>Req: {linkedReq.displayKey || linkedReq.title}</span>
+                              </span>
+                            )}
+                            {!predecessor && !linkedReq && (
+                              <span className="text-slate-400 font-sans text-xs">-</span>
+                            )}
+                          </div>
+                        </td>
 
-                    {dec.rationale && (
-                      <div className="space-y-1.5">
-                        <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                          <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> Context & Rationale
-                        </div>
-                        <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/60 p-3.5 rounded-xl border border-slate-100">
-                          {dec.rationale}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Cross-Workflow Navigation Hub */}
-                    <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2">
-                        {/* Create Action Task */}
-                        <Link
-                          href={`/tasks?create=true&title=${encodeURIComponent(`Implement ADR [${dec.displayKey}]: ${dec.title}`)}&priority=HIGH`}
-                        >
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
-                            title="Create a task to implement this architectural decision"
-                          >
-                            <CheckSquare className="w-3 h-3 text-codex-accent" />
-                            <span>Create Action Task</span>
-                          </Button>
-                        </Link>
-
-                        {/* Revisions History Button */}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openRevisions(dec)}
-                          className="h-7 text-[11px] border-slate-200 text-slate-600 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
-                          title="View revision snapshot history"
-                        >
-                          <History className="w-3 h-3 text-codex-accent" />
-                          <span>Revisions (v{dec.version})</span>
-                        </Button>
-
-                        {/* Discuss with Copilot */}
-                        <Link
-                          href={`/assistant?prompt=${encodeURIComponent(`Review architectural decision [${dec.displayKey}]: "${dec.title}". Outcome: "${dec.decisionText}". Rationale: "${dec.rationale || ''}". What are the key implementation requirements and trade-offs?`)}&mode=DEVELOPER`}
-                        >
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-[11px] text-slate-500 hover:text-slate-800 gap-1 px-2"
-                            title="Analyze this ADR with AI Copilot"
-                          >
-                            <Bot className="w-3 h-3 text-codex-accent" />
-                            <span className="hidden sm:inline">Discuss with Copilot</span>
-                          </Button>
-                        </Link>
-                      </div>
-
-                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono">
-                        <span>Documented {formatDate(dec.createdAt)}</span>
-                        {dec.createdBy && (
-                          <span className="hidden sm:inline">
-                            Author: {dec.createdBy.displayName || dec.createdBy.email}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                        {/* Updated */}
+                        <td className="py-3 px-4 text-slate-500 text-[11.5px] whitespace-nowrap">
+                          {relativeTime}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
-        {/* Revisions History Modal */}
+        {/* CREATE DECISION MODAL (Matching Requirements create modal!) */}
+        {showCreateModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+            <div
+              className="fixed inset-0"
+              onClick={() => !submitting && setShowCreateModal(false)}
+            />
+            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                    <GitPullRequest className="w-4 h-4" />
+                  </div>
+                  <h2 className="text-base font-bold text-slate-900 font-serif">
+                    New Architectural Decision
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreate} className="p-6 space-y-4 overflow-y-auto flex-1">
+                {createErrorMsg && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{createErrorMsg}</span>
+                  </div>
+                )}
+
+                {/* Project Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Project Workspace *</label>
+                  <select
+                    value={createProjectId}
+                    onChange={(e) => setCreateProjectId(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    {activeProjectsList.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.key})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Title */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Decision Title *</label>
+                  <Input
+                    required
+                    value={createTitle}
+                    onChange={(e) => setCreateTitle(e.target.value)}
+                    placeholder="e.g. Adopt Argon2id for User Password Hashing"
+                    className="text-xs h-9 font-medium"
+                  />
+                </div>
+
+                {/* Link Requirement & Supersedes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-700">Link Requirement (Optional)</label>
+                    <select
+                      value={createRequirementId}
+                      onChange={(e) => setCreateRequirementId(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="">-- None (Standalone ADR) --</option>
+                      {requirements.map((req) => (
+                        <option key={req.id} value={req.id}>
+                          {req.displayKey ? `[${req.displayKey}] ` : ""}{req.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-700">Supersedes ADR (Optional)</label>
+                    <select
+                      value={createSupersedesId}
+                      onChange={(e) => setCreateSupersedesId(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="">-- None (Independent Baseline) --</option>
+                      {items.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.displayKey ? `[${item.displayKey}] ` : ""}{item.title} ({item.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Decision Text */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Decision Outcome *</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={createDecisionText}
+                    onChange={(e) => setCreateDecisionText(e.target.value)}
+                    placeholder="Technical specification and choices made..."
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* Rationale */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Rationale & Context (Optional)</label>
+                  <textarea
+                    rows={2}
+                    value={createRationale}
+                    onChange={(e) => setCreateRationale(e.target.value)}
+                    placeholder="Why was this option chosen over alternatives?"
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowCreateModal(false)}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={submitting}
+                    className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                  >
+                    {submitting ? "Saving..." : "Create Decision"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* DECISION DETAIL / EDIT MODAL (Matching Requirements Detail Modal!) */}
+        {activeDec && (
+          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+            <div
+              className="fixed inset-0"
+              onClick={() => !editSubmitting && setActiveDec(null)}
+            />
+            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: getStatusDotColor(editStatus) }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(activeDec.displayKey, "key")}
+                    className="font-mono text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-100 flex items-center gap-1 transition-all"
+                    title="Click to copy key"
+                  >
+                    <span>{activeDec.displayKey || activeDec.id.substring(0, 8)}</span>
+                    <Copy className="w-3 h-3 text-blue-500" />
+                  </button>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[180px] ${getProjectBadgeStyle(
+                      activeDec.project?.name || currentProject?.name
+                    )}`}
+                  >
+                    {activeDec.project?.name || currentProject?.name || "Workspace"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveDec(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form Content */}
+              <form onSubmit={handleUpdate} className="p-6 space-y-4 overflow-y-auto flex-1">
+                {/* Title */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Decision Title *</label>
+                  <Input
+                    required
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="text-xs h-9 font-medium"
+                  />
+                </div>
+
+                {/* Status */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <option value="PROPOSED">Proposed</option>
+                    <option value="ACCEPTED">Accepted</option>
+                    <option value="SUPERSEDED">Superseded</option>
+                  </select>
+                </div>
+
+                {/* Decision Outcome */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Decision Outcome *</label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={editDecisionText}
+                    onChange={(e) => setEditDecisionText(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
+                  />
+                </div>
+
+                {/* Rationale */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">Rationale & Context</label>
+                  <textarea
+                    rows={2}
+                    value={editRationale}
+                    onChange={(e) => setEditRationale(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
+                  />
+                </div>
+
+                {/* Cross-Workflow Actions Hub */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                  {/* Convert to Tasks with AI */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={generatingProposalDecId === activeDec.id}
+                    onClick={() => handleGenerateTasksFromDecision(activeDec)}
+                    className="h-8 text-xs border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 gap-1.5 px-3"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${generatingProposalDecId === activeDec.id ? "animate-spin" : "text-blue-600"}`} />
+                    <span>{generatingProposalDecId === activeDec.id ? "Generating Tasks..." : "Convert to Tasks with AI"}</span>
+                  </Button>
+
+                  {/* Manual Task Link */}
+                  <Link
+                    href={`/tasks?create=true&title=${encodeURIComponent(`Implement ADR [${activeDec.displayKey}]: ${activeDec.title}`)}&priority=HIGH`}
+                  >
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-[#2D8A60]" />
+                      <span>Create Task</span>
+                    </Button>
+                  </Link>
+
+                  {/* Revisions History */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openRevisions(activeDec)}
+                    className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
+                  >
+                    <History className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Revisions (v{activeDec.version})</span>
+                  </Button>
+
+                  {/* Discuss with Copilot */}
+                  <Link
+                    href={`/assistant?prompt=${encodeURIComponent(`Review architectural decision [${activeDec.displayKey}]: "${activeDec.title}". Outcome: "${activeDec.decisionText}". Rationale: "${activeDec.rationale || ''}". What are the key implementation requirements and trade-offs?`)}&mode=DEVELOPER`}
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs text-slate-600 hover:text-slate-900 gap-1.5 px-2.5"
+                    >
+                      <Bot className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Copilot</span>
+                    </Button>
+                  </Link>
+                </div>
+
+                {/* Footer buttons */}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDelete}
+                    className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-1 px-2.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </Button>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActiveDec(null)}
+                      className="text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={editSubmitting}
+                      className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                    >
+                      {editSubmitting ? "Saving..." : "Save Changes"}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* REVISIONS HISTORY MODAL */}
         {revisionsModalDec && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
             <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden">
               <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-codex-accent bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                    <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100">
                       {revisionsModalDec.displayKey || revisionsModalDec.id.substring(0, 8)}
                     </span>
                     <h2 className="text-base font-bold text-slate-900 font-serif">
@@ -890,8 +1264,9 @@ export default function DecisionsPage() {
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setRevisionsModalDec(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -909,25 +1284,27 @@ export default function DecisionsPage() {
                     {revisionsList.map((rev: any, idx: number) => (
                       <div
                         key={rev.id || idx}
-                        className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2 relative"
+                        className="p-4 rounded-xl border border-slate-200/90 bg-slate-50/50 space-y-2 relative"
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <Badge className="bg-[#161927] text-white text-[10px] font-mono">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-900 text-white">
                               v{rev.version}
-                            </Badge>
-                            {getStatusBadge(rev.status)}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadgeStyle(rev.status)}`}>
+                              {rev.status}
+                            </span>
                           </div>
                           <span className="text-[10px] text-slate-400 font-mono">
                             {formatDateTime(rev.createdAt)}
                           </span>
                         </div>
                         <h4 className="text-xs font-bold text-slate-800 font-serif">{rev.title}</h4>
-                        <div className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-100">
+                        <div className="text-xs text-slate-700 bg-white p-3 rounded-lg border border-slate-100 leading-relaxed">
                           {rev.decisionText}
                         </div>
                         {rev.rationale && (
-                          <div className="text-[11px] text-slate-500 bg-white/60 p-2 rounded-lg border border-slate-100 italic">
+                          <div className="text-[11px] text-slate-500 bg-white/60 p-2.5 rounded-lg border border-slate-100 italic leading-relaxed">
                             <span className="font-semibold not-italic text-slate-600">Rationale: </span>
                             {rev.rationale}
                           </div>
@@ -955,23 +1332,19 @@ export default function DecisionsPage() {
           </div>
         )}
 
-        {/* Workflow Progression Banner */}
-        <div className="mt-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-codex-accent flex items-center justify-center shrink-0 border border-blue-100">
-              <CheckSquare className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-900 font-serif">Next in Workflow: Implementation Tasks</p>
-              <p className="text-[11px] text-slate-500">Convert accepted architectural decisions into actionable development tasks and assign them to team members.</p>
-            </div>
-          </div>
-          <Link href="/tasks">
-            <Button size="sm" className="text-xs bg-codex-accent hover:bg-codex-hover text-white shadow-xs shrink-0">
-              Go to Tasks →
-            </Button>
-          </Link>
-        </div>
+        {/* AI Proposal Review Dialog */}
+        {activeProposal && (
+          <ProposalReviewDialog
+            isOpen={!!activeProposal}
+            onClose={() => setActiveProposal(null)}
+            proposal={activeProposal}
+            projectId={activeProposal.projectId || currentProject?.id || ""}
+            onConfirmed={() => {
+              setActiveProposal(null);
+              loadData();
+            }}
+          />
+        )}
       </div>
     </AppLayout>
   );

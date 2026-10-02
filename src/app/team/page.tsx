@@ -9,24 +9,45 @@ import { api } from "@/lib/api";
 import {
   Users,
   UserPlus,
-  Mail,
   Shield,
   Clock,
-  Check,
   Copy,
   Trash2,
   Search,
-  Sparkles,
-  ExternalLink,
-  ChevronDown,
-  AlertCircle,
   CheckCircle2,
   X,
-  Briefcase,
-  Code,
-  Layers,
   ShieldAlert,
 } from "lucide-react";
+import { CustomDropdown, type CustomDropdownOption } from "@/components/ui/custom-dropdown";
+import { FilterDropdown, type FilterOption } from "@/components/ui/filter-dropdown";
+
+const INVITE_PROF_ROLE_OPTIONS: CustomDropdownOption[] = [
+  { value: "DEVELOPER", label: "Developer" },
+  { value: "PM", label: "Product Manager" },
+  { value: "QA", label: "QA Engineer" },
+  { value: "INFRASTRUCTURE", label: "DevOps / Infra" },
+  { value: "DX", label: "UX / DX" },
+  { value: "PRESENTATION", label: "Technical Writer" },
+];
+
+const INVITE_SYSTEM_ROLE_OPTIONS: CustomDropdownOption[] = [
+  { value: "USER", label: "Member" },
+  { value: "ADMIN", label: "Admin" },
+];
+
+const FILTER_ROLE_OPTIONS: FilterOption[] = [
+  { value: "DEVELOPER", label: "Developer", color: "#3B82F6" },
+  { value: "PM", label: "Product Manager", color: "#F59E0B" },
+  { value: "QA", label: "QA Engineer", color: "#10B981" },
+  { value: "INFRASTRUCTURE", label: "DevOps / Infra", color: "#8B5CF6" },
+  { value: "DX", label: "UX / DX", color: "#06B6D4" },
+  { value: "PRESENTATION", label: "Technical Writer", color: "#14B8A6" },
+];
+
+const FILTER_ACCESS_OPTIONS: FilterOption[] = [
+  { value: "ADMIN", label: "Admin", color: "#EF4444" },
+  { value: "USER", label: "Member", color: "#64748B" },
+];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -53,6 +74,63 @@ interface WorkspaceInvite {
   createdAt: string;
 }
 
+function getMemberAvatarBg(role: string): string {
+  switch (role) {
+    case "PM":
+      return "bg-amber-600";
+    case "DEVELOPER":
+      return "bg-blue-600";
+    case "QA":
+      return "bg-emerald-600";
+    case "INFRASTRUCTURE":
+      return "bg-purple-600";
+    case "DX":
+      return "bg-cyan-600";
+    case "PRESENTATION":
+      return "bg-teal-600";
+    default:
+      return "bg-slate-700";
+  }
+}
+
+function getProfRoleLabel(role: string): string {
+  switch (role) {
+    case "PM":
+      return "Product Manager";
+    case "DEVELOPER":
+      return "Developer";
+    case "QA":
+      return "QA Engineer";
+    case "INFRASTRUCTURE":
+      return "DevOps / Infra";
+    case "DX":
+      return "UX / DX";
+    case "PRESENTATION":
+      return "Technical Writer";
+    default:
+      return role || "Member";
+  }
+}
+
+function getProfRoleBadgeStyle(role: string): string {
+  switch (role) {
+    case "PM":
+      return "bg-amber-50 text-amber-700 border-amber-200/80";
+    case "DEVELOPER":
+      return "bg-blue-50 text-blue-700 border-blue-200/80";
+    case "QA":
+      return "bg-emerald-50 text-emerald-700 border-emerald-200/80";
+    case "INFRASTRUCTURE":
+      return "bg-purple-50 text-purple-700 border-purple-200/80";
+    case "DX":
+      return "bg-cyan-50 text-cyan-700 border-cyan-200/80";
+    case "PRESENTATION":
+      return "bg-teal-50 text-teal-700 border-teal-200/80";
+    default:
+      return "bg-slate-100 text-slate-700 border-slate-200/80";
+  }
+}
+
 export default function TeamPage() {
   const { user: currentUser } = useAuth();
   const { showToast } = useToast();
@@ -75,9 +153,8 @@ export default function TeamPage() {
   // Filter and search state
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>("ALL");
+  const [selectedAccessFilter, setSelectedAccessFilter] = useState<string>("ALL");
   const [busyId, setBusyId] = useState("");
-
-  const isAdmin = currentUser?.systemRole === "ADMIN" || (currentUser as any)?.role === "admin";
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -113,23 +190,6 @@ export default function TeamPage() {
     () => invites.filter((inv) => inv.status === "PENDING"),
     [invites]
   );
-
-  const adminCount = useMemo(
-    () => members.filter((m) => m.systemRole === "ADMIN").length,
-    [members]
-  );
-
-  const developerCount = useMemo(
-    () => members.filter((m) => m.professionalRole === "DEVELOPER").length,
-    [members]
-  );
-
-  const expiringSoonCount = useMemo(() => {
-    return pendingInvites.filter((inv) => {
-      const diff = new Date(inv.expiresAt).getTime() - Date.now();
-      return diff > 0 && diff <= 48 * 60 * 60 * 1000;
-    }).length;
-  }, [pendingInvites]);
 
   // Chip management logic
   const mergeEmails = (raw: string): string[] | null => {
@@ -259,11 +319,11 @@ export default function TeamPage() {
   // Filtered members list
   const filteredMembers = useMemo(() => {
     return members.filter((m) => {
-      if (selectedRoleFilter !== "ALL") {
-        if (selectedRoleFilter === "ADMIN" && m.systemRole !== "ADMIN") return false;
-        if (selectedRoleFilter === "DEVELOPER" && m.professionalRole !== "DEVELOPER") return false;
-        if (selectedRoleFilter === "PM" && m.professionalRole !== "PM") return false;
-        if (selectedRoleFilter === "QA" && m.professionalRole !== "QA") return false;
+      if (selectedRoleFilter !== "ALL" && m.professionalRole !== selectedRoleFilter) {
+        return false;
+      }
+      if (selectedAccessFilter !== "ALL" && m.systemRole !== selectedAccessFilter) {
+        return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -273,7 +333,7 @@ export default function TeamPage() {
       }
       return true;
     });
-  }, [members, selectedRoleFilter, searchQuery]);
+  }, [members, selectedRoleFilter, selectedAccessFilter, searchQuery]);
 
   // User avatar helper
   const getInitials = (name?: string, email?: string) => {
@@ -283,134 +343,42 @@ export default function TeamPage() {
     return raw.slice(0, 2).toUpperCase();
   };
 
-  const getRoleBadgeStyle = (profRole: string, systemRole: string) => {
-    if (systemRole === "ADMIN") {
-      return "bg-rose-50 text-rose-700 border-rose-200";
-    }
-    switch (profRole) {
-      case "PM":
-        return "bg-amber-50 text-amber-700 border-amber-200";
-      case "DEVELOPER":
-        return "bg-blue-50 text-blue-700 border-blue-200";
-      case "QA":
-        return "bg-emerald-50 text-emerald-700 border-emerald-200";
-      case "INFRASTRUCTURE":
-        return "bg-purple-50 text-purple-700 border-purple-200";
-      case "DX":
-        return "bg-cyan-50 text-cyan-700 border-cyan-200";
-      default:
-        return "bg-slate-100 text-slate-700 border-slate-200";
-    }
-  };
-
   return (
     <AppLayout>
       <div className="space-y-6 max-w-7xl mx-auto pb-12">
         {/* Breadcrumb & Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <nav className="flex items-center gap-1.5 text-xs font-medium text-slate-500 mb-1">
-              <Link href="/dashboard" className="text-blue-600 hover:text-blue-700 hover:underline">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+              <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
                 Dashboard
               </Link>
               <span>/</span>
-              <span className="text-slate-800">Team</span>
-            </nav>
-            <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 tracking-tight">
+              <span className="text-slate-800 font-medium">Team</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
               Team & Workspace Members
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500 font-normal">
-              Manage workspace members, assign roles, and invite new colleagues.
+            <p className="text-xs text-slate-500 mt-1">
+              Manage workspace members, assign roles, and invite new colleagues to collaborate.
             </p>
           </div>
         </div>
-
-        {/* Overview KPI Cards Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Total Members */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Workspace Members
-              </span>
-              <div className="text-2xl font-bold font-serif text-slate-900">
-                {members.length}
+        {/* Inline Invite Box */}
+        <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                <UserPlus className="w-4 h-4 stroke-[2.2]" />
               </div>
-              <p className="text-[11px] text-slate-500">
-                {adminCount} {adminCount === 1 ? "Admin" : "Admins"} active
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-              <Users className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-
-          {/* Card 2: Developers */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Engineers / Devs
-              </span>
-              <div className="text-2xl font-bold font-serif text-slate-900">
-                {developerCount}
+              <div>
+                <h2 className="text-base font-bold font-serif text-slate-900 flex items-center gap-2">
+                  <span>Invite Colleagues to Workspace</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Send direct invitation links. Colleagues set their password to join your workspace immediately.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Product developers
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <Code className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-
-          {/* Card 3: Pending Invites */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Pending Invites
-              </span>
-              <div className="text-2xl font-bold font-serif text-slate-900">
-                {pendingInvites.length}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Awaiting sign up
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <Mail className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-
-          {/* Card 4: Expiring Soon */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Expiring Soon
-              </span>
-              <div className="text-2xl font-bold font-serif text-slate-900">
-                {expiringSoonCount}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Expiring within 48h
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
-              <Clock className="w-5 h-5 stroke-[2.2]" />
-            </div>
-          </div>
-        </div>
-
-        {/* Inline Invite Box (Merged Pattern from evalora-frontend) */}
-        <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="text-base font-bold font-serif text-slate-900 flex items-center gap-2">
-                <UserPlus className="w-4 h-4 text-blue-600" />
-                <span>Invite Colleagues to Workspace</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Generate an invitation link. Colleagues set their name and password to join your workspace immediately.
-              </p>
             </div>
           </div>
 
@@ -418,7 +386,7 @@ export default function TeamPage() {
             <div className="flex flex-col lg:flex-row items-stretch lg:items-start gap-3">
               {/* Chip Input Container */}
               <div className="flex-1">
-                <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-1.5 transition-all focus-within:border-blue-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-500/20">
+                <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-slate-50/90 px-3 py-1.5 transition-all focus-within:border-[#2563eb] focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-500/20">
                   {inviteEmails.map((email) => (
                     <span
                       key={email}
@@ -466,42 +434,30 @@ export default function TeamPage() {
               {/* Role Selectors */}
               <div className="flex flex-wrap items-center gap-2">
                 {/* Professional Role */}
-                <div className="relative">
-                  <select
-                    value={inviteProfRole}
-                    onChange={(e: any) => setInviteProfRole(e.target.value)}
-                    className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 pr-8 text-xs font-medium text-slate-700 shadow-2xs hover:border-slate-300 focus:outline-none cursor-pointer h-11"
-                  >
-                    <option value="DEVELOPER">Role: Developer</option>
-                    <option value="PM">Role: Product Manager</option>
-                    <option value="QA">Role: QA Engineer</option>
-                    <option value="INFRASTRUCTURE">Role: DevOps / Infra</option>
-                    <option value="DX">Role: UX / DX</option>
-                    <option value="PRESENTATION">Role: Technical Writer</option>
-                  </select>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <CustomDropdown
+                  labelPrefix="Role"
+                  value={inviteProfRole}
+                  onChange={(val) => setInviteProfRole(val as any)}
+                  options={INVITE_PROF_ROLE_OPTIONS}
+                  menuWidth="min-w-[195px]"
+                />
 
                 {/* System Role */}
-                <div className="relative">
-                  <select
-                    value={inviteSystemRole}
-                    onChange={(e: any) => setInviteSystemRole(e.target.value)}
-                    className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 pr-8 text-xs font-medium text-slate-700 shadow-2xs hover:border-slate-300 focus:outline-none cursor-pointer h-11"
-                  >
-                    <option value="USER">Access: Member</option>
-                    <option value="ADMIN">Access: Admin</option>
-                  </select>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <CustomDropdown
+                  labelPrefix="Access"
+                  value={inviteSystemRole}
+                  onChange={(val) => setInviteSystemRole(val as any)}
+                  options={INVITE_SYSTEM_ROLE_OPTIONS}
+                  menuWidth="min-w-[170px]"
+                />
 
                 {/* Submit Button */}
                 <button
                   type="submit"
                   disabled={inviting}
-                  className="h-11 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer shrink-0"
+                  className="h-11 px-5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer shrink-0"
                 >
-                  <UserPlus className="w-4 h-4" />
+                  <UserPlus className="w-4 h-4 stroke-[2.2]" />
                   <span>
                     {inviting
                       ? "Generating..."
@@ -513,9 +469,9 @@ export default function TeamPage() {
               </div>
             </div>
 
-            {/* Recently generated invite links ready to copy */}
+            {/* Recently generated invite links */}
             {recentInviteLinks.length > 0 && (
-              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2">
                 <div className="flex items-center justify-between text-xs font-medium text-slate-700">
                   <span className="flex items-center gap-1.5 text-emerald-700 font-semibold">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -524,7 +480,7 @@ export default function TeamPage() {
                   <button
                     type="button"
                     onClick={() => setRecentInviteLinks([])}
-                    className="text-slate-400 hover:text-slate-600 text-[11px]"
+                    className="text-slate-400 hover:text-slate-600 text-[11px] cursor-pointer"
                   >
                     Clear list
                   </button>
@@ -533,16 +489,16 @@ export default function TeamPage() {
                   {recentInviteLinks.map((item) => (
                     <div
                       key={item.email}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-lg bg-white border border-slate-200 text-xs"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg bg-white border border-slate-200/80 text-xs shadow-2xs"
                     >
                       <div className="min-w-0">
                         <span className="font-semibold text-slate-900">{item.email}</span>
-                        <span className="text-slate-400 block truncate text-[11px]">{item.link}</span>
+                        <span className="text-slate-400 block truncate text-[11px] font-mono mt-0.5">{item.link}</span>
                       </div>
                       <button
                         type="button"
                         onClick={() => copyToClipboard(item.link, `Invite link for ${item.email}`)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-xs transition-colors shrink-0 cursor-pointer self-start sm:self-auto"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/60 font-medium text-xs transition-colors shrink-0 cursor-pointer self-start sm:self-auto"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         <span>Copy Link</span>
@@ -556,7 +512,7 @@ export default function TeamPage() {
         </section>
 
         {/* Filter and Members Table */}
-        <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-2xs">
           {/* Header & Filter Toolbar */}
           <div className="p-5 border-b border-slate-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
             <div>
@@ -570,31 +526,41 @@ export default function TeamPage() {
 
             <div className="flex flex-wrap items-center gap-2.5">
               {/* Role Filter */}
-              <div className="relative">
-                <select
-                  value={selectedRoleFilter}
-                  onChange={(e) => setSelectedRoleFilter(e.target.value)}
-                  className="appearance-none bg-white border border-slate-200 rounded-lg px-3 py-1.5 pr-8 text-xs font-medium text-slate-700 hover:border-slate-300 shadow-2xs focus:outline-none cursor-pointer h-9"
-                >
-                  <option value="ALL">Role: All</option>
-                  <option value="ADMIN">Role: Admin</option>
-                  <option value="DEVELOPER">Role: Developer</option>
-                  <option value="PM">Role: PM</option>
-                  <option value="QA">Role: QA</option>
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+              <FilterDropdown
+                label="Role"
+                allLabel="All roles"
+                value={selectedRoleFilter}
+                onChange={setSelectedRoleFilter}
+                options={FILTER_ROLE_OPTIONS}
+              />
+
+              {/* Access Filter */}
+              <FilterDropdown
+                label="Access"
+                allLabel="All access"
+                value={selectedAccessFilter}
+                onChange={setSelectedAccessFilter}
+                options={FILTER_ACCESS_OPTIONS}
+              />
 
               {/* Search input */}
               <div className="relative flex-1 md:w-56">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Filter by name or email..."
+                  placeholder="Filter members..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs h-9"
+                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
                 />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -603,10 +569,29 @@ export default function TeamPage() {
           {loading ? (
             <div className="p-12 text-center text-xs text-slate-400">Loading workspace team members...</div>
           ) : filteredMembers.length === 0 ? (
-            <div className="p-12 text-center space-y-2">
-              <Users className="w-8 h-8 text-slate-300 mx-auto" />
-              <p className="text-sm font-semibold text-slate-800">No members match your criteria</p>
-              <p className="text-xs text-slate-500">Try adjusting your search query or role filter.</p>
+            <div className="text-center py-16 p-8 space-y-3">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
+                <Users className="w-6 h-6 stroke-[1.8]" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900">No members match your criteria</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                {members.length === 0
+                  ? "No team members found in this workspace."
+                  : "Try adjusting your role or access filters, or clear your search query."}
+              </p>
+              {(selectedRoleFilter !== "ALL" || selectedAccessFilter !== "ALL" || searchQuery) && (
+                <button
+                  onClick={() => {
+                    setSelectedRoleFilter("ALL");
+                    setSelectedAccessFilter("ALL");
+                    setSearchQuery("");
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-2xs cursor-pointer transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear filters</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -625,13 +610,18 @@ export default function TeamPage() {
                   {filteredMembers.map((member) => {
                     const isSelf = member.id === currentUser?.id;
                     const initials = getInitials(member.displayName, member.email);
+                    const avatarBg = getMemberAvatarBg(member.professionalRole);
+                    const profBadgeStyle = getProfRoleBadgeStyle(member.professionalRole);
+                    const profRoleLabel = getProfRoleLabel(member.professionalRole);
 
                     return (
                       <tr key={member.id} className="hover:bg-slate-50/60 transition-colors">
                         {/* Member Name + Avatar */}
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-slate-800 text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-2xs">
+                            <div
+                              className={`w-8 h-8 rounded-full ${avatarBg} text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-2xs`}
+                            >
                               {initials}
                             </div>
                             <div className="flex items-center gap-2 min-w-0">
@@ -639,7 +629,7 @@ export default function TeamPage() {
                                 {member.displayName || "Workspace Member"}
                               </span>
                               {isSelf && (
-                                <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-200/60">
                                   You
                                 </span>
                               )}
@@ -655,29 +645,29 @@ export default function TeamPage() {
                         {/* Professional Role Badge */}
                         <td className="px-4 py-3.5">
                           <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border ${getRoleBadgeStyle(
-                              member.professionalRole,
-                              member.systemRole
-                            )}`}
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-medium border ${profBadgeStyle}`}
                           >
-                            {member.professionalRole || "DEVELOPER"}
+                            {profRoleLabel}
                           </span>
                         </td>
 
-                        {/* System Role */}
+                        {/* System Access Badge */}
                         <td className="px-4 py-3.5">
-                          <span className="inline-flex items-center gap-1.5 text-slate-700 font-medium">
-                            <Shield
-                              className={`w-3.5 h-3.5 ${
-                                member.systemRole === "ADMIN" ? "text-rose-600" : "text-slate-400"
-                              }`}
-                            />
-                            <span>{member.systemRole === "ADMIN" ? "Admin" : "Standard"}</span>
-                          </span>
+                          {member.systemRole === "ADMIN" ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/80">
+                              <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Admin</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
+                              <Shield className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Member</span>
+                            </span>
+                          )}
                         </td>
 
                         {/* Joined Date */}
-                        <td className="px-4 py-3.5 text-slate-500">
+                        <td className="px-4 py-3.5 text-slate-500 font-normal">
                           {member.createdAt
                             ? new Date(member.createdAt).toLocaleDateString("en-US", {
                                 month: "short",
@@ -689,7 +679,7 @@ export default function TeamPage() {
 
                         {/* Status */}
                         <td className="px-4 py-3.5 text-right">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/80">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             <span>Active</span>
                           </span>
@@ -704,7 +694,7 @@ export default function TeamPage() {
         </section>
 
         {/* Pending Invitations Table */}
-        <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-2xs">
           <div className="p-5 border-b border-slate-200 flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold font-serif text-slate-900 flex items-center gap-2">
@@ -737,6 +727,8 @@ export default function TeamPage() {
                   {pendingInvites.map((inv) => {
                     const origin = typeof window !== "undefined" ? window.location.origin : "";
                     const fullLink = `${origin}/invite/${inv.token}`;
+                    const profBadgeStyle = getProfRoleBadgeStyle(inv.professionalRole);
+                    const profRoleLabel = getProfRoleLabel(inv.professionalRole);
 
                     return (
                       <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
@@ -744,14 +736,19 @@ export default function TeamPage() {
                           {inv.email}
                         </td>
                         <td className="px-4 py-3">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-800">
-                            {inv.professionalRole} ({inv.systemRole})
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${profBadgeStyle}`}>
+                              {profRoleLabel}
+                            </span>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                              {inv.systemRole === "ADMIN" ? "Admin" : "Member"}
+                            </span>
+                          </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-500">
+                        <td className="px-4 py-3 text-slate-600 font-medium">
                           {inv.invitedBy?.displayName || "Admin"}
                         </td>
-                        <td className="px-4 py-3 text-slate-500">
+                        <td className="px-4 py-3 text-slate-500 font-normal">
                           {new Date(inv.expiresAt).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
@@ -764,19 +761,19 @@ export default function TeamPage() {
                             <button
                               type="button"
                               onClick={() => copyToClipboard(fullLink, `Invite link for ${inv.email}`)}
-                              className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/60 font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
                             >
-                              <Copy className="w-3 h-3" />
+                              <Copy className="w-3.5 h-3.5" />
                               <span>Copy Link</span>
                             </button>
                             <button
                               type="button"
                               disabled={busyId === inv.id}
                               onClick={() => handleCancelInvite(inv.id)}
-                              className="px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                               title="Cancel invitation"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-3.5 h-3.5" />
                               <span>Cancel</span>
                             </button>
                           </div>
@@ -791,15 +788,17 @@ export default function TeamPage() {
         </section>
 
         {/* Roles & Permissions Reference Card */}
-        <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <h2 className="text-base font-bold font-serif text-slate-900 flex items-center gap-2">
+        <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+          <div className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-indigo-600" />
-            <span>Workspace Roles & Access Capabilities</span>
-          </h2>
+            <h2 className="text-base font-bold font-serif text-slate-900">
+              Workspace Roles & Access Capabilities
+            </h2>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2">
               <div className="flex items-center gap-2 font-bold text-slate-900">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
                 <span>System Administrator</span>
               </div>
               <p className="text-slate-600 leading-relaxed">
@@ -807,9 +806,9 @@ export default function TeamPage() {
               </p>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2">
               <div className="flex items-center gap-2 font-bold text-slate-900">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
                 <span>Product / Engineer (Member)</span>
               </div>
               <p className="text-slate-600 leading-relaxed">
@@ -817,9 +816,9 @@ export default function TeamPage() {
               </p>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2">
               <div className="flex items-center gap-2 font-bold text-slate-900">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
                 <span>DevOps & Infrastructure</span>
               </div>
               <p className="text-slate-600 leading-relaxed">

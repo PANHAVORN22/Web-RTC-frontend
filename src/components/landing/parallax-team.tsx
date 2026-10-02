@@ -69,7 +69,7 @@ export const ParallaxTeam: React.FC = () => {
             </div>
             <h3 className="font-semibold text-sm text-white">Meeting Transcripts</h3>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              Structured meeting agendas, attendee membership checks, and versioned transcript history ready for Phase 2 copilot RAG.
+              Structured meeting agendas, attendee membership checks, and versioned transcript history integrated with AI Copilot RAG.
             </p>
           </motion.div>
 

@@ -38,6 +38,8 @@ export interface AuthContextType {
   logout: () => Promise<void>;
   setCurrentProject: (proj: Project | null) => void;
   refreshProjects: () => Promise<void>;
+  updateUser: (updated: Partial<User>) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -50,6 +52,8 @@ const AuthContext = createContext<AuthContextType>({
   logout: async () => {},
   setCurrentProject: () => {},
   refreshProjects: async () => {},
+  updateUser: () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -148,6 +152,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCsrfToken(null);
   };
 
+  const refreshUser = async () => {
+    try {
+      const me = await api.auth.me();
+      if (me) setUser(me);
+    } catch {
+      // ignore
+    }
+  };
+
+  const updateUser = (updated: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...updated } : null));
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -160,6 +177,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         setCurrentProject,
         refreshProjects,
+        updateUser,
+        refreshUser,
       }}
     >
       {children}

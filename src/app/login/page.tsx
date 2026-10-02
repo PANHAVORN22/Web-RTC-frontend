@@ -180,7 +180,7 @@ export default function LoginPage() {
 
   // Social click feedback
   const handleSocialClick = (provider: string) => {
-    setError(`${provider} single sign-on is scheduled for Phase 2. Please use your email and password credentials.`);
+    setError(`${provider} single sign-on is scheduled for a future release. Please use your email and password credentials.`);
   };
 
   // Submit Login
@@ -359,7 +359,7 @@ export default function LoginPage() {
           </div>
 
           <p className="text-[11.5px] text-slate-300 leading-relaxed">
-            Phase 1 ships email/password sign-in with hashed passwords and per-user session scoping. OAuth providers aren&apos;t scoped for Phase 1.
+            AI Project Workspace provides email/password sign-in with argon2id hashed passwords and per-user session scoping.
           </p>
 
           {/* Sourced Citations */}

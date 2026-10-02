@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { useToast } from "@/context/toast-context";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import {
   ShieldCheck,
   RefreshCw,
   X,
+  User,
 } from "lucide-react";
 
 interface ProposalReviewDialogProps {
@@ -46,6 +48,18 @@ export function ProposalReviewDialog({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmedResults, setConfirmedResults] = useState<any[] | null>(null);
+  const [members, setMembers] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (isOpen && projectId) {
+      api.projects.getMembers(projectId)
+        .then((res: any) => {
+          const list = Array.isArray(res) ? res : (res?.data || []);
+          setMembers(list);
+        })
+        .catch(() => setMembers([]));
+    }
+  }, [isOpen, projectId]);
 
   useEffect(() => {
     if (proposal && proposal.draftJson) {
@@ -146,7 +160,6 @@ export function ProposalReviewDialog({
 
       setConfirmedResults(res.resultRecordIds);
       showToast("AI proposal successfully confirmed! Records created.", "success");
-      onConfirmed(res.resultRecordIds);
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || "Failed to confirm proposal");
@@ -173,93 +186,129 @@ export function ProposalReviewDialog({
     }
   };
 
+  const isDecisionTaskProposal =
+    proposal.proposalType === "TASK_PROPOSAL" &&
+    proposal.sourceEntityType === "DECISION";
   const isTaskProposal = proposal.proposalType === "TASK_PROPOSAL";
   const isMeetingAnalysis = proposal.proposalType === "MEETING_ANALYSIS";
 
+  const handleClose = () => {
+    if (confirmedResults) {
+      onConfirmed(confirmedResults);
+    }
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="relative w-full max-w-3xl bg-[#0e1015] border border-white/10 rounded-xl shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-150">
+      <div className="relative w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95">
         {/* Header */}
-        <div className="p-4 sm:p-6 border-b border-white/[0.08] flex items-center justify-between bg-white/[0.01]">
+        <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-indigo-400" />
+            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-codex-accent shadow-2xs shrink-0">
+              <Sparkles className="w-5 h-5 text-codex-accent" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">
-                  {isTaskProposal ? "Review Task Proposals" : "Review Meeting Analysis"}
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-bold text-slate-900 font-serif">
+                  {isDecisionTaskProposal
+                    ? "Architectural Decision Task Proposals"
+                    : isTaskProposal
+                    ? "Review Task Proposals"
+                    : "Review Meeting Analysis"}
                 </h3>
-                <Badge variant="outline" className="text-[10px] bg-indigo-500/10 text-indigo-300 border-indigo-500/30">
+                <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 font-mono">
                   {proposal.status}
                 </Badge>
+                {isDecisionTaskProposal && (
+                  <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 font-medium">
+                    ADR Source
+                  </Badge>
+                )}
               </div>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                AI has generated structured proposals. Select, review, and confirm items to create records.
+              <p className="text-xs text-slate-500 mt-1">
+                {isDecisionTaskProposal
+                  ? "AI has broken down this architectural decision into actionable development tasks. Review, assign team members, and confirm to persist on the board."
+                  : isTaskProposal
+                  ? "AI has generated structured proposals. Select, review, and confirm items to create records."
+                  : "AI has analyzed the meeting transcript. Select, review, and confirm items to create records."}
               </p>
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+            onClick={handleClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 sm:p-6 max-h-[65vh] overflow-y-auto space-y-6">
+        <div className="p-5 sm:p-6 max-h-[65vh] overflow-y-auto space-y-6">
           {errorMsg && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-600 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {/* Success summary if already confirmed */}
           {confirmedResults ? (
-            <div className="p-5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            <div className="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 text-emerald-900 space-y-3.5 shadow-xs">
+              <div className="flex items-center gap-2 text-sm font-bold font-serif text-emerald-800">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                 <span>Successfully created {confirmedResults.length} records in project!</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2">
                 {confirmedResults.map((rec: any, idx: number) => (
                   <div
                     key={idx}
-                    className="p-2.5 rounded bg-black/40 border border-emerald-500/20 flex items-center justify-between text-xs"
+                    className="p-3 rounded-xl bg-white border border-emerald-200/80 shadow-2xs flex items-center justify-between text-xs"
                   >
-                    <span className="text-zinc-400">{rec.entityType}:</span>
-                    <span className="font-mono font-bold text-white">{rec.key || rec.id}</span>
+                    <span className="text-slate-500 font-medium">{rec.entityType}:</span>
+                    <span className="font-mono font-bold text-slate-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                      {rec.key || rec.id}
+                    </span>
                   </div>
                 ))}
               </div>
-              <div className="pt-2 flex justify-end">
-                <Button size="sm" onClick={onClose} className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs">
+              <div className="pt-2 flex items-center justify-end gap-2.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleClose}
+                  className="border-slate-200 text-slate-700 hover:bg-slate-50 text-xs shadow-2xs"
+                >
                   Done
                 </Button>
+                <Link href="/tasks" onClick={handleClose}>
+                  <Button size="sm" className="bg-codex-accent hover:bg-codex-hover text-white text-xs gap-1 shadow-xs">
+                    <span>View on Kanban Board</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Button>
+                </Link>
               </div>
             </div>
           ) : (
             <>
               {/* Batch Actions */}
-              <div className="flex items-center justify-between text-xs text-zinc-400 pb-2 border-b border-white/[0.04]">
+              <div className="flex items-center justify-between text-xs text-slate-500 pb-2.5 border-b border-slate-100">
                 <span>
-                  Selected: <strong className="text-indigo-400">{selectedIds.size}</strong> items
+                  Selected: <strong className="text-codex-accent font-semibold">{selectedIds.size}</strong> of {draft.items?.length || (draft.decisions?.length || 0) + (draft.requirements?.length || 0) + (draft.actionItems?.length || 0)} items
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={selectAll}
-                    className="text-xs text-indigo-400 hover:underline hover:text-indigo-300"
+                    className="text-xs text-blue-600 hover:underline hover:text-blue-700 font-medium cursor-pointer"
                   >
                     Select All
                   </button>
-                  <span>•</span>
+                  <span className="text-slate-300">•</span>
                   <button
                     type="button"
                     onClick={deselectAll}
-                    className="text-xs text-zinc-500 hover:underline hover:text-zinc-400"
+                    className="text-xs text-slate-400 hover:underline hover:text-slate-600 cursor-pointer"
                   >
                     Deselect All
                   </button>
@@ -268,16 +317,16 @@ export function ProposalReviewDialog({
 
               {/* Task Proposals Display */}
               {isTaskProposal && draft.items && (
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   {draft.items.map((item: any) => {
                     const isSelected = selectedIds.has(item.itemId);
                     return (
                       <div
                         key={item.itemId}
-                        className={`p-3.5 rounded-lg border transition-all ${
+                        className={`p-4 rounded-xl border transition-all ${
                           isSelected
-                            ? "bg-white/[0.03] border-indigo-500/40 shadow-sm"
-                            : "bg-white/[0.01] border-white/[0.06] opacity-60"
+                            ? "bg-white border-blue-200/90 shadow-sm ring-1 ring-blue-50"
+                            : "bg-slate-50/60 border-slate-200 opacity-60"
                         }`}
                       >
                         <div className="flex items-start gap-3">
@@ -285,15 +334,15 @@ export function ProposalReviewDialog({
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSelect(item.itemId)}
-                            className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500"
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-codex-accent focus:ring-blue-500 cursor-pointer"
                           />
-                          <div className="flex-1 space-y-2">
+                          <div className="flex-1 space-y-2.5">
                             <Input
                               value={item.title}
                               onChange={(e) =>
                                 handleUpdateItem("task", item.itemId, "title", e.target.value)
                               }
-                              className="h-8 text-xs font-semibold bg-[#14161f] border-white/10 text-white"
+                              className="h-8 text-xs font-semibold bg-white border-slate-200 text-slate-900 focus:ring-1 focus:ring-codex-accent"
                               placeholder="Task title"
                             />
                             <textarea
@@ -302,16 +351,16 @@ export function ProposalReviewDialog({
                               onChange={(e) =>
                                 handleUpdateItem("task", item.itemId, "description", e.target.value)
                               }
-                              className="w-full text-xs p-2 rounded bg-[#14161f] border border-white/10 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              className="w-full text-xs p-2.5 rounded-lg bg-slate-50/50 border border-slate-200 text-slate-700 focus:outline-none focus:bg-white focus:ring-1 focus:ring-codex-accent transition-colors"
                               placeholder="Task description"
                             />
-                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <div className="flex flex-wrap items-center gap-2 pt-0.5">
                               <select
                                 value={item.priority}
                                 onChange={(e) =>
                                   handleUpdateItem("task", item.itemId, "priority", e.target.value)
                                 }
-                                className="h-7 rounded bg-[#161820] border border-white/10 px-2 text-[11px] text-zinc-300"
+                                className="h-7.5 rounded-lg bg-white border border-slate-200 px-2.5 text-[11px] text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-codex-accent cursor-pointer"
                               >
                                 <option value="LOW">Priority: Low</option>
                                 <option value="MEDIUM">Priority: Medium</option>
@@ -324,8 +373,27 @@ export function ProposalReviewDialog({
                                 onChange={(e) =>
                                   handleUpdateItem("task", item.itemId, "dueDate", e.target.value)
                                 }
-                                className="h-7 w-36 text-[11px] bg-[#161820] border-white/10 text-zinc-300"
+                                className="h-7.5 w-36 text-[11px] bg-white border-slate-200 text-slate-800 shadow-2xs"
                               />
+                              <select
+                                value={item.assigneeId || ""}
+                                onChange={(e) =>
+                                  handleUpdateItem("task", item.itemId, "assigneeId", e.target.value || null)
+                                }
+                                className="h-7.5 rounded-lg bg-white border border-slate-200 px-2.5 text-[11px] text-slate-800 shadow-2xs max-w-[210px] focus:outline-none focus:ring-1 focus:ring-codex-accent cursor-pointer"
+                                title="Assign to team member"
+                              >
+                                <option value="">Assignee: Unassigned</option>
+                                {members.map((m: any) => {
+                                  const name = m.user?.displayName || m.user?.email || m.userId;
+                                  const role = m.user?.professionalRole ? ` (${m.user.professionalRole})` : "";
+                                  return (
+                                    <option key={m.userId} value={m.userId}>
+                                      Assign to: {name}{role}
+                                    </option>
+                                  );
+                                })}
+                              </select>
                             </div>
                           </div>
                         </div>
@@ -340,18 +408,18 @@ export function ProposalReviewDialog({
                 <div className="space-y-5">
                   {/* Summary Section */}
                   {draft.summary && (
-                    <div className="p-3.5 rounded-lg border border-white/[0.06] bg-white/[0.02] space-y-2">
+                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-white flex items-center gap-2">
-                          <FileCheck2 className="w-4 h-4 text-indigo-400" />
+                        <label className="text-xs font-bold text-slate-900 font-serif flex items-center gap-2">
+                          <FileCheck2 className="w-4 h-4 text-codex-accent" />
                           <span>Meeting Executive Summary</span>
                         </label>
-                        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
+                        <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={includeSummary}
                             onChange={(e) => setIncludeSummary(e.target.checked)}
-                            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600"
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-codex-accent"
                           />
                           <span>Save to Meeting</span>
                         </label>
@@ -360,16 +428,16 @@ export function ProposalReviewDialog({
                         rows={3}
                         value={draft.summary}
                         onChange={(e) => setDraft({ ...draft, summary: e.target.value })}
-                        className="w-full text-xs p-2.5 rounded bg-[#14161f] border border-white/10 text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="w-full text-xs p-2.5 rounded-lg bg-white border border-slate-200 text-slate-800 focus:outline-none focus:ring-1 focus:ring-codex-accent"
                       />
                     </div>
                   )}
 
                   {/* Decisions Section */}
                   {draft.decisions && draft.decisions.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-bold text-zinc-300 flex items-center gap-2">
-                        <Layers className="w-3.5 h-3.5 text-amber-400" />
+                    <div className="space-y-2.5">
+                      <h4 className="text-xs font-bold text-slate-800 font-serif flex items-center gap-2">
+                        <Layers className="w-3.5 h-3.5 text-amber-500" />
                         <span>Identified Decisions ({draft.decisions.length})</span>
                       </h4>
                       {draft.decisions.map((d: any) => {
@@ -377,10 +445,10 @@ export function ProposalReviewDialog({
                         return (
                           <div
                             key={d.itemId}
-                            className={`p-3 rounded-lg border transition-all ${
+                            className={`p-3.5 rounded-xl border transition-all ${
                               isSelected
-                                ? "bg-white/[0.03] border-amber-500/30"
-                                : "bg-white/[0.01] border-white/[0.06] opacity-60"
+                                ? "bg-white border-amber-200/90 shadow-2xs ring-1 ring-amber-50"
+                                : "bg-slate-50/60 border-slate-200 opacity-60"
                             }`}
                           >
                             <div className="flex items-start gap-2.5">
@@ -388,15 +456,15 @@ export function ProposalReviewDialog({
                                 type="checkbox"
                                 checked={isSelected}
                                 onChange={() => toggleSelect(d.itemId)}
-                                className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-amber-600 focus:ring-amber-500"
+                                className="mt-1 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                               />
-                              <div className="flex-1 space-y-1.5">
+                              <div className="flex-1 space-y-2">
                                 <Input
                                   value={d.title}
                                   onChange={(e) =>
                                     handleUpdateItem("decision", d.itemId, "title", e.target.value)
                                   }
-                                  className="h-7 text-xs font-semibold bg-[#14161f] border-white/10 text-white"
+                                  className="h-7.5 text-xs font-semibold bg-white border-slate-200 text-slate-900"
                                 />
                                 <textarea
                                   rows={2}
@@ -404,7 +472,7 @@ export function ProposalReviewDialog({
                                   onChange={(e) =>
                                     handleUpdateItem("decision", d.itemId, "decisionText", e.target.value)
                                   }
-                                  className="w-full text-xs p-2 rounded bg-[#14161f] border border-white/10 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                  className="w-full text-xs p-2 rounded-lg bg-slate-50/50 border border-slate-200 text-slate-700 focus:outline-none focus:bg-white focus:ring-1 focus:ring-amber-500"
                                 />
                               </div>
                             </div>
@@ -416,9 +484,9 @@ export function ProposalReviewDialog({
 
                   {/* Requirements Section */}
                   {draft.requirements && draft.requirements.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-bold text-zinc-300 flex items-center gap-2">
-                        <FileCheck2 className="w-3.5 h-3.5 text-blue-400" />
+                    <div className="space-y-2.5">
+                      <h4 className="text-xs font-bold text-slate-800 font-serif flex items-center gap-2">
+                        <FileCheck2 className="w-3.5 h-3.5 text-codex-accent" />
                         <span>Identified Requirements ({draft.requirements.length})</span>
                       </h4>
                       {draft.requirements.map((r: any) => {
@@ -426,10 +494,10 @@ export function ProposalReviewDialog({
                         return (
                           <div
                             key={r.itemId}
-                            className={`p-3 rounded-lg border transition-all ${
+                            className={`p-3.5 rounded-xl border transition-all ${
                               isSelected
-                                ? "bg-white/[0.03] border-blue-500/30"
-                                : "bg-white/[0.01] border-white/[0.06] opacity-60"
+                                ? "bg-white border-blue-200/90 shadow-2xs ring-1 ring-blue-50"
+                                : "bg-slate-50/60 border-slate-200 opacity-60"
                             }`}
                           >
                             <div className="flex items-start gap-2.5">
@@ -437,15 +505,15 @@ export function ProposalReviewDialog({
                                 type="checkbox"
                                 checked={isSelected}
                                 onChange={() => toggleSelect(r.itemId)}
-                                className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-blue-600 focus:ring-blue-500"
+                                className="mt-1 h-4 w-4 rounded border-slate-300 text-codex-accent focus:ring-blue-500 cursor-pointer"
                               />
-                              <div className="flex-1 space-y-1.5">
+                              <div className="flex-1 space-y-2">
                                 <Input
                                   value={r.title}
                                   onChange={(e) =>
                                     handleUpdateItem("requirement", r.itemId, "title", e.target.value)
                                   }
-                                  className="h-7 text-xs font-semibold bg-[#14161f] border-white/10 text-white"
+                                  className="h-7.5 text-xs font-semibold bg-white border-slate-200 text-slate-900"
                                 />
                                 <textarea
                                   rows={2}
@@ -454,7 +522,7 @@ export function ProposalReviewDialog({
                                     handleUpdateItem("requirement", r.itemId, "acceptanceCriteria", e.target.value)
                                   }
                                   placeholder="Acceptance Criteria"
-                                  className="w-full text-xs p-2 rounded bg-[#14161f] border border-white/10 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  className="w-full text-xs p-2 rounded-lg bg-slate-50/50 border border-slate-200 text-slate-700 focus:outline-none focus:bg-white focus:ring-1 focus:ring-codex-accent"
                                 />
                               </div>
                             </div>
@@ -466,9 +534,9 @@ export function ProposalReviewDialog({
 
                   {/* Action Items Section */}
                   {draft.actionItems && draft.actionItems.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-bold text-zinc-300 flex items-center gap-2">
-                        <ListTodo className="w-3.5 h-3.5 text-indigo-400" />
+                    <div className="space-y-2.5">
+                      <h4 className="text-xs font-bold text-slate-800 font-serif flex items-center gap-2">
+                        <ListTodo className="w-3.5 h-3.5 text-codex-accent" />
                         <span>Action Items / Tasks ({draft.actionItems.length})</span>
                       </h4>
                       {draft.actionItems.map((a: any) => {
@@ -476,10 +544,10 @@ export function ProposalReviewDialog({
                         return (
                           <div
                             key={a.itemId}
-                            className={`p-3 rounded-lg border transition-all ${
+                            className={`p-3.5 rounded-xl border transition-all ${
                               isSelected
-                                ? "bg-white/[0.03] border-indigo-500/30"
-                                : "bg-white/[0.01] border-white/[0.06] opacity-60"
+                                ? "bg-white border-blue-200/90 shadow-2xs ring-1 ring-blue-50"
+                                : "bg-slate-50/60 border-slate-200 opacity-60"
                             }`}
                           >
                             <div className="flex items-start gap-2.5">
@@ -487,15 +555,15 @@ export function ProposalReviewDialog({
                                 type="checkbox"
                                 checked={isSelected}
                                 onChange={() => toggleSelect(a.itemId)}
-                                className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500"
+                                className="mt-1 h-4 w-4 rounded border-slate-300 text-codex-accent focus:ring-blue-500 cursor-pointer"
                               />
-                              <div className="flex-1 space-y-1.5">
+                              <div className="flex-1 space-y-2">
                                 <Input
                                   value={a.title}
                                   onChange={(e) =>
                                     handleUpdateItem("actionItem", a.itemId, "title", e.target.value)
                                   }
-                                  className="h-7 text-xs font-semibold bg-[#14161f] border-white/10 text-white"
+                                  className="h-7.5 text-xs font-semibold bg-white border-slate-200 text-slate-900"
                                 />
                               </div>
                             </div>
@@ -512,14 +580,14 @@ export function ProposalReviewDialog({
 
         {/* Footer actions */}
         {!confirmedResults && (
-          <div className="p-4 sm:p-6 border-t border-white/[0.08] bg-white/[0.01] flex items-center justify-between">
+          <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={handleReject}
               disabled={submitting}
-              className="border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs"
+              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 text-xs shadow-2xs"
             >
               <XCircle className="w-3.5 h-3.5 mr-1.5" />
               <span>Reject Draft</span>
@@ -530,9 +598,9 @@ export function ProposalReviewDialog({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={onClose}
+                onClick={handleClose}
                 disabled={submitting}
-                className="text-zinc-400 hover:text-white text-xs"
+                className="text-slate-500 hover:text-slate-800 text-xs"
               >
                 Cancel
               </Button>
@@ -541,7 +609,7 @@ export function ProposalReviewDialog({
                 size="sm"
                 onClick={handleConfirm}
                 disabled={submitting}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs shadow-lg shadow-indigo-500/25"
+                className="bg-codex-accent hover:bg-codex-hover text-white text-xs shadow-xs px-4"
               >
                 {submitting ? (
                   <>
