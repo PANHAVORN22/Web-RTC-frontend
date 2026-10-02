@@ -20,6 +20,7 @@ import {
   Sparkles,
   Database,
   Cpu,
+  Code2,
 } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
@@ -43,6 +44,8 @@ const TYPE_ICONS: Record<string, any> = {
   MEETING: Calendar,
   DOCUMENT: FileText,
   GITHUB_ISSUE: GithubIcon,
+  GITHUB_PR: GitPullRequest,
+  GITHUB_CODE: Code2,
 };
 
 const TYPE_LINKS: Record<string, string> = {
@@ -52,6 +55,8 @@ const TYPE_LINKS: Record<string, string> = {
   MEETING: "/meetings",
   DOCUMENT: "/documents",
   GITHUB_ISSUE: "/integrations",
+  GITHUB_PR: "/integrations",
+  GITHUB_CODE: "/integrations",
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -61,6 +66,8 @@ const TYPE_COLORS: Record<string, string> = {
   MEETING: "bg-cyan-50 text-cyan-700 border border-cyan-200",
   DOCUMENT: "bg-amber-50 text-amber-700 border border-amber-200",
   GITHUB_ISSUE: "bg-slate-900 text-white border border-slate-700",
+  GITHUB_PR: "bg-emerald-50 text-emerald-800 border border-emerald-200",
+  GITHUB_CODE: "bg-indigo-50 text-indigo-800 border border-indigo-200",
 };
 
 const SUGGESTIONS = [
@@ -171,7 +178,9 @@ export default function SearchPage() {
     (counts.TASK || 0) +
     (counts.MEETING || 0) +
     (counts.DOCUMENT || 0) +
-    (counts.GITHUB_ISSUE || 0);
+    (counts.GITHUB_ISSUE || 0) +
+    (counts.GITHUB_PR || 0) +
+    (counts.GITHUB_CODE || 0);
 
   return (
     <AppLayout>
@@ -366,6 +375,26 @@ export default function SearchPage() {
               }`}
             >
               GitHub Issues ({counts.GITHUB_ISSUE || 0})
+            </button>
+            <button
+              onClick={() => handleTypeChange("GITHUB_PR")}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                selectedType === "GITHUB_PR"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              GitHub PRs ({counts.GITHUB_PR || 0})
+            </button>
+            <button
+              onClick={() => handleTypeChange("GITHUB_CODE")}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                selectedType === "GITHUB_CODE"
+                  ? "bg-[#161927] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Source Code ({counts.GITHUB_CODE || 0})
             </button>
           </div>
         )}

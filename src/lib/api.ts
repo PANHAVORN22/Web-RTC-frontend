@@ -481,6 +481,7 @@ export const api = {
       projectId: string,
       meetingId: string,
       data: {
+        version?: number;
         title?: string;
         startsAt?: string;
         endsAt?: string;
@@ -656,8 +657,12 @@ export const api = {
   },
   integrations: {
     github: {
-      getConnection: async (projectId: string) =>
-        apiRequest<any>(`/projects/${projectId}/integrations/github`),
+      listConnections: async (projectId: string) =>
+        apiRequest<any[]>(`/projects/${projectId}/integrations/github/connections`),
+      getConnection: async (projectId: string, connectionId?: string) => {
+        const qs = connectionId ? `?connectionId=${connectionId}` : "";
+        return apiRequest<any>(`/projects/${projectId}/integrations/github${qs}`);
+      },
       connect: async (
         projectId: string,
         data: { repositoryOwner: string; repositoryName: string; accessToken?: string }
@@ -666,23 +671,36 @@ export const api = {
           method: "POST",
           body: JSON.stringify(data),
         }),
-      sync: async (projectId: string, accessToken?: string) =>
-        apiRequest<{ syncedCount: number; totalCount: number; lastSyncedAt: string }>(
+      sync: async (projectId: string, connectionId?: string, accessToken?: string) =>
+        apiRequest<{ syncedCount: number; totalCount: number; syncedPrCount?: number; totalPrCount?: number; lastSyncedAt: string }>(
           `/projects/${projectId}/integrations/github/sync`,
           {
             method: "POST",
-            body: JSON.stringify({ accessToken }),
+            body: JSON.stringify({ connectionId, accessToken }),
           }
         ),
-      disconnect: async (projectId: string) =>
-        apiRequest<void>(`/projects/${projectId}/integrations/github`, {
+      syncCode: async (projectId: string, connectionId?: string, accessToken?: string) =>
+        apiRequest<{ indexedFilesCount: number; totalFiles: number; lastSyncedAt: string }>(
+          `/projects/${projectId}/integrations/github/sync-code`,
+          {
+            method: "POST",
+            body: JSON.stringify({ connectionId, accessToken }),
+          }
+        ),
+      disconnect: async (projectId: string, connectionId?: string) => {
+        const url = connectionId
+          ? `/projects/${projectId}/integrations/github/connections/${connectionId}`
+          : `/projects/${projectId}/integrations/github`;
+        return apiRequest<void>(url, {
           method: "DELETE",
-        }),
+        });
+      },
       listIssues: async (
         projectId: string,
-        params?: { state?: string; q?: string; page?: number; limit?: number }
+        params?: { state?: string; q?: string; page?: number; limit?: number; connectionId?: string }
       ) => {
         const q = new URLSearchParams();
+        if (params?.connectionId) q.append("connectionId", params.connectionId);
         if (params?.state) q.append("state", params.state);
         if (params?.q) q.append("q", params.q);
         if (params?.page) q.append("page", String(params.page));
@@ -690,6 +708,36 @@ export const api = {
         const qs = q.toString() ? `?${q.toString()}` : "";
         return apiRequest<{ items: any[]; total: number; page: number; limit: number }>(
           `/projects/${projectId}/integrations/github/issues${qs}`
+        );
+      },
+      listPullRequests: async (
+        projectId: string,
+        params?: { state?: string; q?: string; page?: number; limit?: number; connectionId?: string }
+      ) => {
+        const q = new URLSearchParams();
+        if (params?.connectionId) q.append("connectionId", params.connectionId);
+        if (params?.state) q.append("state", params.state);
+        if (params?.q) q.append("q", params.q);
+        if (params?.page) q.append("page", String(params.page));
+        if (params?.limit) q.append("limit", String(params.limit));
+        const qs = q.toString() ? `?${q.toString()}` : "";
+        return apiRequest<{ items: any[]; total: number; page: number; limit: number }>(
+          `/projects/${projectId}/integrations/github/pull-requests${qs}`
+        );
+      },
+      listFiles: async (
+        projectId: string,
+        params?: { extension?: string; q?: string; page?: number; limit?: number; connectionId?: string }
+      ) => {
+        const q = new URLSearchParams();
+        if (params?.connectionId) q.append("connectionId", params.connectionId);
+        if (params?.extension) q.append("extension", params.extension);
+        if (params?.q) q.append("q", params.q);
+        if (params?.page) q.append("page", String(params.page));
+        if (params?.limit) q.append("limit", String(params.limit));
+        const qs = q.toString() ? `?${q.toString()}` : "";
+        return apiRequest<{ items: any[]; total: number; page: number; limit: number }>(
+          `/projects/${projectId}/integrations/github/files${qs}`
         );
       },
     },

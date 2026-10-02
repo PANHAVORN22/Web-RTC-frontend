@@ -6,6 +6,7 @@ import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import {
   Users,
   UserPlus,
@@ -293,17 +294,27 @@ export default function TeamPage() {
     }
   };
 
+  // Cancel invitation state
+  const [cancelConfirmInvite, setCancelConfirmInvite] = useState<any | null>(null);
+  const [cancellingInvite, setCancellingInvite] = useState(false);
+
   // Cancel invitation
-  const handleCancelInvite = async (inviteId: string) => {
-    setBusyId(inviteId);
+  const handleCancelInvite = (invite: any) => {
+    setCancelConfirmInvite(invite);
+  };
+
+  const handleConfirmCancelInvite = async () => {
+    if (!cancelConfirmInvite) return;
+    setCancellingInvite(true);
     try {
-      await api.workspace.cancelInvite(inviteId);
+      await api.workspace.cancelInvite(cancelConfirmInvite.id);
       showToast("Invitation cancelled successfully", "info");
+      setCancelConfirmInvite(null);
       await loadData();
     } catch (err: any) {
       showToast(err.message || "Failed to cancel invitation", "error");
     } finally {
-      setBusyId("");
+      setCancellingInvite(false);
     }
   };
 
@@ -769,7 +780,7 @@ export default function TeamPage() {
                             <button
                               type="button"
                               disabled={busyId === inv.id}
-                              onClick={() => handleCancelInvite(inv.id)}
+                              onClick={() => handleCancelInvite(inv)}
                               className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                               title="Cancel invitation"
                             >
@@ -827,6 +838,19 @@ export default function TeamPage() {
             </div>
           </div>
         </section>
+
+        {/* CANCEL INVITATION CONFIRMATION MODAL */}
+        <DeleteConfirmModal
+          isOpen={!!cancelConfirmInvite}
+          onClose={() => !cancellingInvite && setCancelConfirmInvite(null)}
+          onConfirm={handleConfirmCancelInvite}
+          title="Cancel invitation"
+          itemName={cancelConfirmInvite?.email}
+          itemType="invitation"
+          warningText="This action cannot be undone. The invite link will become invalid immediately."
+          confirmText="Cancel invitation"
+          loading={cancellingInvite}
+        />
       </div>
     </AppLayout>
   );

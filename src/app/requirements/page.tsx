@@ -7,6 +7,7 @@ import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { ProposalReviewDialog } from "@/components/ai/proposal-review-dialog";
 import { api } from "@/lib/api";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
@@ -233,6 +234,10 @@ export default function RequirementsPage() {
   const [revisionsModalReq, setRevisionsModalReq] = useState<RequirementItem | null>(null);
   const [revisionsList, setRevisionsList] = useState<any[]>([]);
   const [loadingRevisions, setLoadingRevisions] = useState(false);
+
+  // Delete Confirmation state
+  const [deleteConfirmReq, setDeleteConfirmReq] = useState<RequirementItem | null>(null);
+  const [deletingReq, setDeletingReq] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -463,19 +468,24 @@ export default function RequirementsPage() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!activeReq) return;
-    if (!confirm(`Are you sure you want to delete requirement "${activeReq.title}"?`)) return;
-    setEditSubmitting(true);
+    setDeleteConfirmReq(activeReq);
+  };
+
+  const handleConfirmDeleteRequirement = async () => {
+    if (!deleteConfirmReq) return;
+    setDeletingReq(true);
     try {
-      await api.requirements.delete(activeReq.projectId, activeReq.id);
-      showToast("Requirement deleted", "success");
+      await api.requirements.delete(deleteConfirmReq.projectId, deleteConfirmReq.id);
+      showToast("Requirement deleted successfully", "success");
+      setDeleteConfirmReq(null);
       setActiveReq(null);
       await loadData();
     } catch (err: any) {
       showToast(err.message || "Failed to delete requirement", "error");
     } finally {
-      setEditSubmitting(false);
+      setDeletingReq(false);
     }
   };
 
@@ -1203,6 +1213,19 @@ export default function RequirementsPage() {
           }}
         />
       )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      <DeleteConfirmModal
+        isOpen={!!deleteConfirmReq}
+        onClose={() => !deletingReq && setDeleteConfirmReq(null)}
+        onConfirm={handleConfirmDeleteRequirement}
+        title="Delete requirement"
+        itemName={deleteConfirmReq?.title}
+        itemType="requirement"
+        warningText="This action cannot be undone. All linked tasks and traceability links will be detached."
+        confirmText="Delete requirement"
+        loading={deletingReq}
+      />
     </AppLayout>
   );
 }

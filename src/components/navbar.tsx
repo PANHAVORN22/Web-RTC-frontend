@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, Project } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
+import { DropdownSelect } from "@/components/ui/dropdown-select";
 import {
   Search,
   Plus,
@@ -61,24 +62,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center gap-3 shrink-0">
             {/* Active Project Switcher */}
             {projects.length > 0 && (
-              <div className="hidden sm:flex items-center gap-2 bg-white border border-codex-border rounded-xl px-3 py-1.5 shadow-sm text-xs">
-                <FolderKanban className="w-3.5 h-3.5 text-codex-accent shrink-0" />
-                <select
-                  value={currentProject?.id || ""}
-                  onChange={(e) => {
-                    const p = projects.find((proj: Project) => proj.id === e.target.value);
-                    if (p) setCurrentProject(p);
-                  }}
-                  className="bg-transparent text-xs font-semibold text-codex-text focus:outline-none cursor-pointer pr-1"
-                  aria-label="Select active project"
-                >
-                  {projects.map((p: Project) => (
-                    <option key={p.id} value={p.id}>
-                      [{p.key}] {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <DropdownSelect
+                value={currentProject?.id || ""}
+                onChange={(val) => {
+                  const p = projects.find((proj: Project) => proj.id === val);
+                  if (p) setCurrentProject(p);
+                }}
+                triggerClassName="hidden sm:flex h-9 border-codex-border/90 text-xs rounded-xl shadow-2xs font-semibold"
+                align="right"
+                options={projects.map((p: Project) => ({
+                  value: p.id,
+                  label: `[${p.key}] ${p.name}`,
+                  icon: <FolderKanban className="w-3.5 h-3.5 text-codex-accent shrink-0" />,
+                }))}
+              />
             )}
 
             {/* Notification Center */}

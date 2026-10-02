@@ -6,6 +6,7 @@ import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
@@ -224,6 +225,10 @@ export default function TasksPage() {
   const [editAssigneeId, setEditAssigneeId] = useState("");
   const [editBlockedReason, setEditBlockedReason] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Delete Task Confirmation State
+  const [deleteConfirmTask, setDeleteConfirmTask] = useState<TaskItem | null>(null);
+  const [deletingTask, setDeletingTask] = useState(false);
 
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
 
@@ -624,19 +629,24 @@ export default function TasksPage() {
     }
   };
 
-  const handleDeleteTask = async () => {
+  const handleDeleteTask = () => {
     if (!editingTask) return;
-    if (!confirm(`Are you sure you want to delete task "${editingTask.title}"?`)) return;
-    setEditSubmitting(true);
+    setDeleteConfirmTask(editingTask);
+  };
+
+  const handleConfirmDeleteTask = async () => {
+    if (!deleteConfirmTask) return;
+    setDeletingTask(true);
     try {
-      await api.tasks.delete(editingTask.projectId, editingTask.id);
-      showToast("Task deleted", "success");
+      await api.tasks.delete(deleteConfirmTask.projectId, deleteConfirmTask.id);
+      showToast("Task deleted successfully", "success");
+      setDeleteConfirmTask(null);
       setEditingTask(null);
       await loadData();
     } catch (err: any) {
       showToast(err.message || "Failed to delete task", "error");
     } finally {
-      setEditSubmitting(false);
+      setDeletingTask(false);
     }
   };
 
@@ -1534,6 +1544,19 @@ export default function TasksPage() {
           </div>
         </div>
       )}
+
+      {/* DELETE TASK CONFIRMATION MODAL */}
+      <DeleteConfirmModal
+        isOpen={!!deleteConfirmTask}
+        onClose={() => !deletingTask && setDeleteConfirmTask(null)}
+        onConfirm={handleConfirmDeleteTask}
+        title="Delete task"
+        itemName={deleteConfirmTask?.title}
+        itemType="task"
+        warningText="This action cannot be undone. The task and its subtask dependencies will be permanently deleted."
+        confirmText="Delete task"
+        loading={deletingTask}
+      />
     </AppLayout>
   );
 }

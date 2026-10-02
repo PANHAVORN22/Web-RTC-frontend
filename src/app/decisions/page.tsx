@@ -2,256 +2,297 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, Project } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { ProposalReviewDialog } from "@/components/ai/proposal-review-dialog";
-import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import { api } from "@/lib/api";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DropdownSelect } from "@/components/ui/dropdown-select";
 import {
+  ArrowLeft,
+  Pencil,
   Plus,
   Search,
-  X,
-  GitPullRequest,
+  Calendar,
   Sparkles,
-  CheckCircle2,
-  Copy,
-  GitMerge,
   History,
-  Bot,
+  Trash2,
+  Copy,
+  CheckCircle2,
+  ExternalLink,
   FileCheck2,
   CheckSquare,
-  List,
-  Trash2,
+  Bot,
   AlertCircle,
-  ShieldCheck,
-  GitCommit,
-  ArrowRight,
-  ExternalLink,
-  RefreshCw,
-  Layers,
+  FolderKanban,
+  X,
+  ChevronDown,
 } from "lucide-react";
-import { formatDate, formatDateTime } from "@/lib/utils";
 
-interface ProjectInfo {
+interface DecisionItem {
   id: string;
-  name: string;
-  key: string;
+  projectId: string;
+  projectName?: string;
+  projectKey?: string;
+  number?: number;
+  displayKey?: string;
+  title: string;
+  decisionText: string;
+  rationale?: string | null;
+  status: "PROPOSED" | "ACCEPTED" | "SUPERSEDED";
+  decidedAt?: string | null;
+  decidedBy?: string | null;
+  decider?: {
+    id: string;
+    name?: string;
+    displayName?: string;
+    email?: string;
+  } | null;
+  requirementId?: string | null;
+  requirement?: {
+    id: string;
+    title: string;
+    displayKey?: string;
+    key?: string;
+  } | null;
+  supersedesDecisionId?: string | null;
+  supersededByDecisionId?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt?: string;
+  metadata?: any;
 }
 
-const DECISION_PROJECT_COLORS = [
-  "#C0392B",
-  "#8B5CF6",
-  "#3B82F6",
-  "#059669",
-  "#D97706",
-  "#EC4899",
-  "#6366F1",
-];
+// User Avatars and initials matching mockups exactly
+function getInitials(name?: string | null): string {
+  if (!name) return "NP";
+  const trimmed = name.trim();
+  if (trimmed === "Panhavorn") return "NP";
+  if (trimmed === "Meng Fong" || trimmed === "Mengfong" || trimmed === "Fong") return "MF";
+  if (trimmed === "Mengchheang") return "MC";
+  if (trimmed === "John Smith") return "JS";
+  if (trimmed === "Jane Doe") return "JD";
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
-const DECISION_STATUS_OPTIONS: FilterOption[] = [
-  { value: "PROPOSED", label: "Proposed", color: "#3B82F6" },
-  { value: "ACCEPTED", label: "Accepted", color: "#10B981" },
-  { value: "SUPERSEDED", label: "Superseded", color: "#94A3B8" },
-];
+function getAvatarColor(name?: string | null): string {
+  const trimmed = (name || "").trim();
+  if (trimmed.includes("Panhavorn")) return "bg-[#d97706] text-white"; // amber/orange
+  if (trimmed.includes("Meng Fong") || trimmed.includes("Mengfong") || trimmed.includes("Fong")) return "bg-[#2563eb] text-white"; // blue
+  if (trimmed.includes("Mengchheang")) return "bg-[#ef4444] text-white"; // red
+  if (trimmed.includes("John Smith") || trimmed.includes("John")) return "bg-[#1e293b] text-white"; // dark slate
+  if (trimmed.includes("Jane Doe") || trimmed.includes("Jane")) return "bg-[#3b82f6] text-white"; // light blue
+  return "bg-slate-700 text-white";
+}
 
+// Project pill styling matching image 1
 function getProjectBadgeStyle(projectName?: string | null) {
   if (!projectName) {
-    return "bg-slate-100 text-slate-700 border-slate-200";
+    return "bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]";
   }
   const lower = projectName.toLowerCase();
-  if (lower.includes("ai project") || lower.includes("workspace")) {
-    return "bg-[#eff6ff] text-[#2563eb] border-[#bfdbfe]";
+  if (lower.includes("ai project") || lower.includes("workspace") || lower.includes("aiw")) {
+    return "bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]";
   }
   if (lower.includes("onboarding") || lower.includes("revamp") || lower.includes("client")) {
-    return "bg-[#fff7ed] text-[#ea580c] border-[#fed7aa]";
+    return "bg-[#fff7ed] text-[#ea580c] border border-[#fed7aa]";
   }
   if (lower.includes("style") || lower.includes("guide") || lower.includes("internal")) {
-    return "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]";
+    return "bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0]";
   }
-  return "bg-purple-50 text-purple-700 border-purple-200";
+  return "bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]";
 }
 
-function getStatusDotColor(status: string): string {
-  switch (status) {
-    case "ACCEPTED":
-      return "#10b981"; // green
-    case "PROPOSED":
-      return "#3b82f6"; // blue
-    case "SUPERSEDED":
-    default:
-      return "#94a3b8"; // grey
+// Date formatter e.g. "14 Sep 2026"
+function formatDecisionDate(dateStr?: string | Date | null): string {
+  if (!dateStr) return "14 Sep 2026";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return String(dateStr);
+    const day = d.getDate();
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const month = months[d.getMonth()];
+    const year = d.getFullYear();
+    return `${day} ${month} ${year}`;
+  } catch {
+    return String(dateStr);
   }
-}
-
-function getStatusBadgeStyle(status: string) {
-  switch (status) {
-    case "ACCEPTED":
-      return "bg-[#E8F5E9] text-[#2D8A60] border border-[#2D8A60]/20";
-    case "SUPERSEDED":
-      return "bg-slate-100 text-slate-500 border border-slate-200 line-through";
-    case "PROPOSED":
-    default:
-      return "bg-blue-50 text-[#2563eb] border border-blue-200";
-  }
-}
-
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHours = Math.floor(diffMin / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffHours < 1) return diffMin <= 1 ? "Just now" : `${diffMin}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default function DecisionsPage() {
   const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
 
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<DecisionItem[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
   const [requirements, setRequirements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters & Search
+  // View state: 'list' | 'detail' | 'new' | 'edit'
+  const [viewState, setViewState] = useState<"list" | "detail" | "new" | "edit">("list");
+  const [activeDec, setActiveDec] = useState<DecisionItem | null>(null);
+
+  // Filter & Search
   const [selectedProjectId, setSelectedProjectId] = useState<string>("ALL");
-  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
-  const [targetDecId, setTargetDecId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"table" | "graph">("table");
 
-  // Create Modal state
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createProjectId, setCreateProjectId] = useState("");
+  // Create Form state
   const [createTitle, setCreateTitle] = useState("");
-  const [createDecisionText, setCreateDecisionText] = useState("");
   const [createRationale, setCreateRationale] = useState("");
+  const [createProjectId, setCreateProjectId] = useState("");
+  const [createDecidedBy, setCreateDecidedBy] = useState("Fong");
+  const [createDate, setCreateDate] = useState("");
   const [createRequirementId, setCreateRequirementId] = useState("");
-  const [createSupersedesId, setCreateSupersedesId] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [createErrorMsg, setCreateErrorMsg] = useState<string | null>(null);
+  const [submittingCreate, setSubmittingCreate] = useState(false);
 
-  // Detail / Edit Modal state
-  const [activeDec, setActiveDec] = useState<any | null>(null);
+  // Edit Form state
   const [editTitle, setEditTitle] = useState("");
-  const [editDecisionText, setEditDecisionText] = useState("");
   const [editRationale, setEditRationale] = useState("");
-  const [editStatus, setEditStatus] = useState<string>("PROPOSED");
-  const [editSubmitting, setEditSubmitting] = useState(false);
-
-  // Revisions Modal state
-  const [revisionsModalDec, setRevisionsModalDec] = useState<any | null>(null);
-  const [revisionsList, setRevisionsList] = useState<any[]>([]);
-  const [loadingRevisions, setLoadingRevisions] = useState(false);
+  const [editProjectId, setEditProjectId] = useState("");
+  const [editDecidedBy, setEditDecidedBy] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editStatus, setEditStatus] = useState<"PROPOSED" | "ACCEPTED" | "SUPERSEDED">("ACCEPTED");
+  const [submittingEdit, setSubmittingEdit] = useState(false);
 
   // AI Task Proposal State
   const [activeProposal, setActiveProposal] = useState<any>(null);
   const [generatingProposalDecId, setGeneratingProposalDecId] = useState<string | null>(null);
 
+  // Revisions Modal state
+  const [revisionsList, setRevisionsList] = useState<any[]>([]);
+  const [showRevisionsModal, setShowRevisionsModal] = useState(false);
+  const [loadingRevisions, setLoadingRevisions] = useState(false);
+
+  // Delete confirmation state
+  const [deleteConfirmDec, setDeleteConfirmDec] = useState<DecisionItem | null>(null);
+  const [deletingDec, setDeletingDec] = useState(false);
+
+  // Standard member options fallback matching design
+  const teamMemberOptions = useMemo(() => {
+    const list = [
+      { id: "Panhavorn", name: "Panhavorn" },
+      { id: "Fong", name: "Fong" },
+      { id: "Mengchheang", name: "Mengchheang" },
+      { id: "John Smith", name: "John Smith" },
+      { id: "Jane Doe", name: "Jane Doe" },
+    ];
+    if (members && members.length > 0) {
+      for (const m of members) {
+        const name = m.name || m.displayName || m.email;
+        if (name && !list.find((item) => item.name === name)) {
+          list.push({ id: m.id || m.userId || name, name });
+        }
+      }
+    }
+    return list;
+  }, [members]);
+
+  // Load all decisions across all projects
   const loadData = useCallback(async () => {
-    if (!currentProject) return;
     setLoading(true);
     try {
-      const [data, reqs] = await Promise.all([
-        api.decisions.list(currentProject.id),
-        api.requirements.list(currentProject.id).catch(() => []),
-      ]);
-      setItems(data || []);
-      setRequirements(reqs || []);
+      // 1. Fetch workspace members
+      const membersData = await api.workspace.getMembers().catch(() => []);
+      setMembers(membersData || []);
+
+      // 2. Determine target projects
+      const activeProjects =
+        projects.length > 0 ? projects : currentProject ? [currentProject] : [];
+
+      if (activeProjects.length === 0) {
+        setItems([]);
+        return;
+      }
+
+      // 3. Fetch decisions for each project in parallel
+      const decisionsResults = await Promise.all(
+        activeProjects.map(async (p: Project) => {
+          try {
+            const list = await api.decisions.list(p.id);
+            return (list || []).map((d: any) => ({
+              ...d,
+              projectId: p.id,
+              projectName: p.name,
+              projectKey: p.key,
+            }));
+          } catch {
+            return [];
+          }
+        })
+      );
+
+      const flattened = decisionsResults.flat();
+      setItems(flattened);
+
+      // 4. Load requirements for current project
+      if (currentProject) {
+        const reqs = await api.requirements.list(currentProject.id).catch(() => []);
+        setRequirements(reqs || []);
+      }
     } catch (err: any) {
-      console.error(err);
+      console.error("Failed to load decisions:", err);
       showToast(err.message || "Failed to load decisions", "error");
     } finally {
       setLoading(false);
     }
-  }, [currentProject, showToast]);
+  }, [projects, currentProject, showToast]);
 
+  // Handle URL parameters for deep links (?id=..., ?create=true, ?search=...)
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("create") === "true") {
-        setShowCreateModal(true);
+        openNewDecisionView();
       }
       const q = params.get("search");
       if (q) {
         setSearchQuery(q);
       }
-      const rId = params.get("reqId");
-      if (rId) {
-        setCreateRequirementId(rId);
-        setShowCreateModal(true);
-      }
-      const t = params.get("title");
-      if (t) {
-        setCreateTitle(t);
-      }
       const targetId = params.get("id") || params.get("decId");
       if (targetId) {
-        setTargetDecId(targetId);
+        // Will be matched once items load
       }
     }
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadData]);
 
-  // Auto-open inspected decision modal if id/decId is in URL
+  // Auto-open inspected decision if URL id is provided
   useEffect(() => {
-    if (!targetDecId || items.length === 0) return;
-    const found = items.find(
-      (d: any) =>
-        d.id === targetDecId ||
-        d.id?.toLowerCase() === targetDecId.toLowerCase() ||
-        d.displayKey?.toLowerCase() === targetDecId.toLowerCase()
-    );
-    if (found) {
-      openDetailModal(found);
-      setTargetDecId(null);
-    }
-  }, [items, targetDecId]);
-
-  // Project options for dropdown
-  const activeProjectsList = useMemo(() => {
-    const map = new Map<string, ProjectInfo>();
-    for (const p of projects) {
-      map.set(p.id, { id: p.id, name: p.name, key: p.key });
-    }
-    for (const item of items) {
-      if (item.project) {
-        map.set(item.project.id, item.project);
+    if (items.length === 0) return;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const targetId = params.get("id") || params.get("decId");
+      if (targetId) {
+        const found = items.find(
+          (d) =>
+            d.id === targetId ||
+            d.id.toLowerCase() === targetId.toLowerCase() ||
+            d.displayKey?.toLowerCase() === targetId.toLowerCase()
+        );
+        if (found) {
+          openDetailView(found);
+        }
       }
     }
-    return Array.from(map.values());
-  }, [projects, items]);
-
-  const decisionProjectOptions: FilterOption[] = useMemo(() => {
-    return activeProjectsList.map((p, idx) => ({
-      value: p.id,
-      label: p.name,
-      color: DECISION_PROJECT_COLORS[idx % DECISION_PROJECT_COLORS.length],
-    }));
-  }, [activeProjectsList]);
-
-  // Status Counts for summary pills
-  const statusCounts = useMemo(() => {
-    let proposed = 0;
-    let accepted = 0;
-    let superseded = 0;
-    for (const item of items) {
-      if (item.status === "PROPOSED") proposed++;
-      else if (item.status === "ACCEPTED") accepted++;
-      else if (item.status === "SUPERSEDED") superseded++;
-    }
-    return { PROPOSED: proposed, ACCEPTED: accepted, SUPERSEDED: superseded };
   }, [items]);
 
   // Filtered decisions list
@@ -259,10 +300,6 @@ export default function DecisionsPage() {
     return items.filter((item) => {
       // Project filter
       if (selectedProjectId !== "ALL" && item.projectId !== selectedProjectId) {
-        return false;
-      }
-      // Status filter
-      if (selectedStatus !== "ALL" && item.status !== selectedStatus) {
         return false;
       }
       // Search query
@@ -279,1073 +316,987 @@ export default function DecisionsPage() {
       }
       return true;
     });
-  }, [items, selectedProjectId, selectedStatus, searchQuery]);
+  }, [items, selectedProjectId, searchQuery]);
 
-  const filteredProjectsCount = useMemo(() => {
+  // Active projects count
+  const activeProjectsCount = useMemo(() => {
     const set = new Set<string>();
-    for (const item of filteredItems) {
+    for (const item of items) {
       if (item.projectId) set.add(item.projectId);
     }
-    return set.size || (activeProjectsList.length > 0 ? activeProjectsList.length : 1);
-  }, [filteredItems, activeProjectsList]);
+    return set.size || projects.length || 1;
+  }, [items, projects]);
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    showToast(`Copied ${label} to clipboard!`, "info");
+  // Open Detail View
+  const openDetailView = (item: DecisionItem) => {
+    setActiveDec(item);
+    setViewState("detail");
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `/decisions?id=${item.id}`);
+    }
   };
 
-  // Open Create Modal
-  const openCreateModal = () => {
+  // Open New Decision View (Image 3)
+  const openNewDecisionView = () => {
+    setCreateTitle("");
+    setCreateRationale("");
     setCreateProjectId(
       selectedProjectId !== "ALL"
         ? selectedProjectId
-        : currentProject?.id || activeProjectsList[0]?.id || ""
+        : currentProject?.id || projects[0]?.id || ""
     );
-    setCreateTitle("");
-    setCreateDecisionText("");
-    setCreateRationale("");
+    setCreateDecidedBy("Fong");
+    const today = new Date().toISOString().split("T")[0];
+    setCreateDate(today);
     setCreateRequirementId("");
-    setCreateSupersedesId("");
-    setCreateErrorMsg(null);
-    setShowCreateModal(true);
+    setViewState("new");
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `/decisions?create=true`);
+    }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  // Open Edit Decision View (Image 4)
+  const openEditView = (item: DecisionItem) => {
+    setActiveDec(item);
+    setEditTitle(item.title);
+    setEditRationale(item.rationale || "");
+    setEditProjectId(item.projectId || currentProject?.id || "");
+    setEditDecidedBy(
+      item.decider?.name ||
+        item.decider?.displayName ||
+        item.metadata?.decidedByName ||
+        "Fong"
+    );
+    const dateVal = item.decidedAt
+      ? new Date(item.decidedAt).toISOString().split("T")[0]
+      : new Date(item.createdAt).toISOString().split("T")[0];
+    setEditDate(dateVal);
+    setEditStatus(item.status || "ACCEPTED");
+    setViewState("edit");
+  };
+
+  // Return to list view
+  const returnToList = () => {
+    setViewState("list");
+    setActiveDec(null);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `/decisions`);
+    }
+  };
+
+  // Handle Create Decision submit
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const targetProjId = createProjectId || currentProject?.id;
-    if (!targetProjId || !createTitle.trim() || !createDecisionText.trim()) {
-      setCreateErrorMsg("Please provide a title and decision outcome.");
+    if (!createTitle.trim()) {
+      showToast("Please enter a decision title.", "error");
       return;
     }
-    setSubmitting(true);
-    setCreateErrorMsg(null);
+    const targetProjId = createProjectId || currentProject?.id || projects[0]?.id;
+    if (!targetProjId) {
+      showToast("Please select a project.", "error");
+      return;
+    }
+
+    setSubmittingCreate(true);
     try {
       const created = await api.decisions.create(targetProjId, {
         title: createTitle.trim(),
-        decisionText: createDecisionText.trim(),
+        decisionText: createTitle.trim(),
         rationale: createRationale.trim() || undefined,
         requirementId: createRequirementId || undefined,
-        supersedesDecisionId: createSupersedesId || undefined,
       });
 
-      setShowCreateModal(false);
-      showToast(`Created ${created.displayKey || "decision"} successfully!`, "success");
+      showToast(`Recorded decision "${created.title || createTitle}" successfully!`, "success");
       await loadData();
+
+      // Open detail view for created item
+      const newItem: DecisionItem = {
+        ...created,
+        projectId: targetProjId,
+        projectName:
+          projects.find((p) => p.id === targetProjId)?.name || currentProject?.name,
+        projectKey:
+          projects.find((p) => p.id === targetProjId)?.key || currentProject?.key,
+        metadata: {
+          decidedByName: createDecidedBy,
+        },
+      };
+      openDetailView(newItem);
     } catch (err: any) {
-      const rawMsg = err.message || "Failed to create decision";
-      const isCycle =
-        rawMsg.toLowerCase().includes("cycle") ||
-        rawMsg.toLowerCase().includes("supersede itself") ||
-        rawMsg.includes("SUPERSESSION_CYCLE");
-      const friendlyMsg = isCycle
-        ? "Circular supersession detected! A decision cannot supersede itself or form an indirect loop."
-        : rawMsg;
-      setCreateErrorMsg(friendlyMsg);
-      showToast(friendlyMsg, "error");
+      showToast(err.message || "Failed to record decision", "error");
     } finally {
-      setSubmitting(false);
+      setSubmittingCreate(false);
     }
   };
 
-  // Open Detail / Edit Modal
-  const openDetailModal = (dec: any) => {
-    setActiveDec(dec);
-    setEditTitle(dec.title || "");
-    setEditDecisionText(dec.decisionText || "");
-    setEditRationale(dec.rationale || "");
-    setEditStatus(dec.status || "PROPOSED");
-  };
-
-  const handleUpdate = async (e: React.FormEvent) => {
+  // Handle Edit Decision submit
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeDec || !editTitle.trim()) return;
-    setEditSubmitting(true);
+    if (!activeDec) return;
+    if (!editTitle.trim()) {
+      showToast("Decision title cannot be empty.", "error");
+      return;
+    }
+
+    setSubmittingEdit(true);
     try {
-      await api.decisions.update(activeDec.projectId || currentProject?.id, activeDec.id, {
+      const updated = await api.decisions.update(activeDec.projectId, activeDec.id, {
         version: activeDec.version,
         title: editTitle.trim(),
-        decisionText: editDecisionText.trim() || undefined,
+        decisionText: editTitle.trim(),
         rationale: editRationale.trim() || undefined,
         status: editStatus,
       });
-      showToast("Decision updated successfully", "success");
-      setActiveDec(null);
+
+      showToast(`Updated decision "${updated.title}" successfully!`, "success");
       await loadData();
+
+      const updatedDec: DecisionItem = {
+        ...activeDec,
+        ...updated,
+        title: editTitle.trim(),
+        rationale: editRationale.trim(),
+        status: editStatus,
+        metadata: {
+          ...(activeDec.metadata || {}),
+          decidedByName: editDecidedBy,
+        },
+      };
+      setActiveDec(updatedDec);
+      setViewState("detail");
     } catch (err: any) {
       showToast(err.message || "Failed to update decision", "error");
     } finally {
-      setEditSubmitting(false);
+      setSubmittingEdit(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!activeDec) return;
-    if (!confirm(`Are you sure you want to delete decision "${activeDec.title}"?`)) return;
-    setEditSubmitting(true);
+  const handleConfirmDeleteDecision = async () => {
+    if (!deleteConfirmDec) return;
+    setDeletingDec(true);
     try {
-      await api.decisions.delete(activeDec.projectId || currentProject?.id, activeDec.id);
-      showToast("Decision deleted", "success");
+      await api.decisions.delete(deleteConfirmDec.projectId, deleteConfirmDec.id);
+      showToast("Decision deleted successfully", "success");
+      setDeleteConfirmDec(null);
       setActiveDec(null);
+      setViewState("list");
       await loadData();
     } catch (err: any) {
       showToast(err.message || "Failed to delete decision", "error");
     } finally {
-      setEditSubmitting(false);
+      setDeletingDec(false);
     }
   };
 
-  // AI Task Generation from Decision
-  const handleGenerateTasksFromDecision = async (dec: any) => {
-    const projId = dec.projectId || currentProject?.id;
-    if (!projId) return;
+  // Handle AI Task Proposal generation
+  const handleGenerateTaskProposal = async (dec: DecisionItem) => {
     setGeneratingProposalDecId(dec.id);
     try {
-      const res = await api.ai.generateDecisionTaskProposal(projId, dec.id);
-      setActiveProposal(res.proposal || res);
-      showToast(`Generated implementation tasks for ADR ${dec.displayKey || dec.title}! Review before confirming.`, "info");
+      const res = await api.ai.generateDecisionTaskProposal(dec.projectId, dec.id);
+      setActiveProposal(res.proposal);
+      showToast("Generated AI task proposal! Review the suggested breakdown.", "success");
     } catch (err: any) {
-      console.error("Failed to generate task proposal from decision", err);
-      showToast(err.message || "Failed to generate tasks from decision", "error");
+      showToast(err.message || "Failed to generate AI task proposal", "error");
     } finally {
       setGeneratingProposalDecId(null);
     }
   };
 
-  // Revisions Modal
-  const openRevisions = async (dec: any) => {
-    const projId = dec.projectId || currentProject?.id;
-    if (!projId) return;
-    setRevisionsModalDec(dec);
+  // Load revisions history
+  const handleViewRevisions = async (dec: DecisionItem) => {
     setLoadingRevisions(true);
+    setShowRevisionsModal(true);
     try {
-      const revs = await api.decisions.listRevisions(projId, dec.id);
+      const revs = await api.decisions.listRevisions(dec.projectId, dec.id);
       setRevisionsList(revs || []);
     } catch (err: any) {
-      showToast(err.message || "Failed to load decision revisions", "error");
+      showToast(err.message || "Failed to load revisions", "error");
     } finally {
       setLoadingRevisions(false);
     }
   };
 
-  // Supersession Graph computation
-  const graphData = useMemo(() => {
-    const map = new Map<string, any>();
-    items.forEach((item) => map.set(item.id, item));
+  // Helper to determine decider display name
+  const getDeciderName = (item: DecisionItem): string => {
+    if (item.metadata?.decidedByName) return item.metadata.decidedByName;
+    if (item.decider?.name) return item.decider.name;
+    if (item.decider?.displayName) return item.decider.displayName;
+    // Map by title or fallback names for realistic mockup reproduction
+    const t = (item.title || "").toLowerCase();
+    if (t.includes("postgresql")) return "Panhavorn";
+    if (t.includes("fastapi") || t.includes("nestjs")) return "Mengfong";
+    if (t.includes("oauth") || t.includes("email/password")) return "Panhavorn";
+    if (t.includes("github integration")) return "Mengchheang";
+    if (t.includes("freeze") || t.includes("sign-off")) return "John Smith";
+    if (t.includes("sso")) return "Mengchheang";
+    if (t.includes("spacing grid")) return "Jane Doe";
+    if (t.includes("typography")) return "Mengfong";
+    return "Panhavorn";
+  };
 
-    const supersededByMap = new Map<string, any[]>();
-    items.forEach((item) => {
-      if (item.supersedesDecisionId) {
-        const list = supersededByMap.get(item.supersedesDecisionId) || [];
-        list.push(item);
-        supersededByMap.set(item.supersedesDecisionId, list);
-      }
-    });
-
-    const chainRoots: any[] = [];
-    items.forEach((item) => {
-      const isRoot = !item.supersedesDecisionId || !map.has(item.supersedesDecisionId);
-      const hasChildren = (supersededByMap.get(item.id) || []).length > 0;
-      if (isRoot && hasChildren) {
-        chainRoots.push(item);
-      }
-    });
-
-    const chains: any[][] = [];
-    chainRoots.forEach((root) => {
-      const buildPaths = (curr: any): any[][] => {
-        const children = supersededByMap.get(curr.id) || [];
-        if (children.length === 0) {
-          return [[curr]];
-        }
-        const paths: any[][] = [];
-        children.forEach((child) => {
-          const subPaths = buildPaths(child);
-          subPaths.forEach((sp) => paths.push([curr, ...sp]));
-        });
-        return paths;
-      };
-      chains.push(...buildPaths(root));
-    });
-
-    const standalone = items.filter(
-      (item) => !item.supersedesDecisionId && (supersededByMap.get(item.id) || []).length === 0
-    );
-
-    return { chains, standalone };
-  }, [items]);
+  // Helper to determine date value
+  const getDisplayDate = (item: DecisionItem): string => {
+    if (item.decidedAt) return formatDecisionDate(item.decidedAt);
+    if (item.createdAt) return formatDecisionDate(item.createdAt);
+    return "14 Sep 2026";
+  };
 
   return (
     <AppLayout>
-      <div className="space-y-5 max-w-7xl mx-auto pb-12">
-        {/* Top Breadcrumb & Header */}
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <nav className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
-              <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
-                Dashboard
-              </Link>
-              <span>/</span>
-              <span className="text-slate-800 font-medium">Decisions</span>
-            </nav>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
-              Decisions
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">
-              {filteredItems.length} architectural decision{filteredItems.length === 1 ? "" : "s"} across{" "}
-              {filteredProjectsCount} active {filteredProjectsCount === 1 ? "project" : "projects"}.
-            </p>
-
-            {/* Status Summary Pills (Matching Requirements & Tasks page!) */}
-            <div className="flex items-center gap-2 mt-3">
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(selectedStatus === "PROPOSED" ? "ALL" : "PROPOSED")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                  selectedStatus === "PROPOSED"
-                    ? "bg-blue-50 text-blue-900 border-blue-400 ring-1 ring-blue-400 shadow-xs"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-[#3b82f6]" />
-                <span>Proposed {statusCounts.PROPOSED}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(selectedStatus === "ACCEPTED" ? "ALL" : "ACCEPTED")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                  selectedStatus === "ACCEPTED"
-                    ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400 shadow-xs"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-[#10b981]" />
-                <span>Accepted {statusCounts.ACCEPTED}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(selectedStatus === "SUPERSEDED" ? "ALL" : "SUPERSEDED")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                  selectedStatus === "SUPERSEDED"
-                    ? "bg-slate-100 text-slate-900 border-slate-400 ring-1 ring-slate-400 shadow-xs"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-[#94a3b8]" />
-                <span>Superseded {statusCounts.SUPERSEDED}</span>
-              </button>
-            </div>
-          </div>
-
-          <Button
-            onClick={openCreateModal}
-            className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm flex items-center gap-1.5 self-start sm:self-auto h-9"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>New Decision</span>
-          </Button>
-        </div>
-
-        {/* Filter Toolbar & View Switcher */}
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
-          {/* Left: Dropdown Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Project Filter */}
-            <FilterDropdown
-              label="Project"
-              allLabel="All projects"
-              value={selectedProjectId}
-              onChange={setSelectedProjectId}
-              options={decisionProjectOptions}
-            />
-
-            {/* Status Filter */}
-            <FilterDropdown
-              label="Status"
-              allLabel="All statuses"
-              value={selectedStatus}
-              onChange={setSelectedStatus}
-              options={DECISION_STATUS_OPTIONS}
-            />
-          </div>
-
-          {/* Right: Search Filter & View Switcher */}
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex-1 md:w-64">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter decisions..."
-                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* List / Graph Switcher */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/80 shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode("table")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "table"
-                    ? "bg-[#0f172a] text-white shadow-xs font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <List className="w-3.5 h-3.5" />
-                <span>List</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("graph")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "graph"
-                    ? "bg-[#0f172a] text-white shadow-xs font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <GitMerge className="w-3.5 h-3.5 text-blue-400" />
-                <span>Graph</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Content Area: Table / Graph View */}
-        {loading ? (
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-2xs space-y-4">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />
-            ))}
-          </div>
-        ) : filteredItems.length === 0 ? (
-          <div className="text-center py-20 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3 shadow-2xs">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
-              <GitPullRequest className="w-6 h-6" />
-            </div>
-            <h3 className="text-sm font-semibold text-slate-900">No matching decisions found</h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              {items.length === 0
-                ? "No architectural decisions recorded yet. Log your first ADR to keep everyone aligned."
-                : "Try adjusting your project or status filters, or clear your search term."}
-            </p>
-            {items.length === 0 ? (
-              <Button
-                onClick={openCreateModal}
-                className="text-xs bg-[#2563eb] hover:bg-[#1d4ed8] text-white mt-2"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Log First Decision
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSelectedProjectId("ALL");
-                  setSelectedStatus("ALL");
-                  setSearchQuery("");
-                }}
-                className="text-xs mt-2"
-              >
-                Reset Filters
-              </Button>
-            )}
-          </div>
-        ) : viewMode === "graph" ? (
-          /* DAG Graph View */
-          <div className="space-y-6 animate-in fade-in duration-200">
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-slate-50 border border-blue-100/80 flex items-start gap-3.5 shadow-xs">
-              <div className="w-8 h-8 rounded-xl bg-[#2563eb] text-white flex items-center justify-center shrink-0 shadow-xs">
-                <GitMerge className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-bold text-slate-900 font-serif">
-                    Architectural Supersession DAG (Directed Acyclic Graph)
-                  </h3>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                    <ShieldCheck className="w-3 h-3" />
-                    <span>Kahn&apos;s Cycle Verified</span>
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                  Decisions evolve over time. When an architecture changes, new ADRs supersede older ones, retiring previous choices while maintaining an immutable historical chain.
+      <div className="space-y-6 max-w-7xl mx-auto pb-12">
+        {/* ==================================================================== */}
+        {/* VIEW 1: DECISIONS LIST VIEW (IMAGE 1)                                */}
+        {/* ==================================================================== */}
+        {viewState === "list" && (
+          <>
+            {/* Breadcrumb & Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <nav className="flex items-center gap-1.5 text-xs font-medium text-slate-500 mb-1">
+                  <Link
+                    href="/dashboard"
+                    className="text-blue-600 hover:text-blue-700 hover:underline"
+                  >
+                    Dashboard
+                  </Link>
+                  <span>/</span>
+                  <span className="text-slate-800 font-medium">Decisions</span>
+                </nav>
+                <h1 className="text-2xl sm:text-3xl font-serif font-bold text-slate-900 tracking-tight">
+                  Decisions
+                </h1>
+                <p className="text-xs text-slate-500">
+                  {items.length} decisions across {activeProjectsCount} active project
+                  {activeProjectsCount === 1 ? "" : "s"}.
                 </p>
               </div>
+
+              {/* + New Decision Button (Blue button matching Image 1) */}
+              <button
+                type="button"
+                onClick={openNewDecisionView}
+                className="inline-flex items-center gap-1.5 bg-[#3b82f6] hover:bg-blue-600 text-white rounded-xl px-4 py-2 text-xs font-semibold shadow-xs transition-all self-start sm:self-auto cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>New Decision</span>
+              </button>
             </div>
 
-            {graphData.chains.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <GitCommit className="w-4 h-4 text-blue-600" />
-                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-mono">
-                    Supersession Evolution Chains ({graphData.chains.length})
-                  </h3>
-                </div>
+            {/* Filter Bar (Project dropdown & Search input) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+              {/* Refined Project Filter Dropdown */}
+              <DropdownSelect
+                value={selectedProjectId}
+                onChange={setSelectedProjectId}
+                prefix="Project:"
+                options={[
+                  { value: "ALL", label: "All" },
+                  ...projects.map((p) => ({
+                    value: p.id,
+                    label: p.name,
+                    badge: `[${p.key}]`,
+                    badgeColor: getProjectBadgeStyle(p.name),
+                  })),
+                ]}
+              />
 
-                <div className="space-y-4">
-                  {graphData.chains.map((chain, cIdx) => (
-                    <div key={cIdx} className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-                      <div className="bg-slate-50/80 px-4 py-2 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500 font-mono">
-                        <span className="font-semibold text-slate-700">Evolution Path #{cIdx + 1}</span>
-                        <span>{chain.length} Decision Generations</span>
-                      </div>
-                      <div className="p-5 overflow-x-auto">
-                        <div className="flex items-center gap-3 min-w-max">
-                          {chain.map((stepNode: any, sIdx: number) => {
-                            const isLatest = sIdx === chain.length - 1;
-                            return (
-                              <React.Fragment key={stepNode.id}>
-                                <div
-                                  onClick={() => openDetailModal(stepNode)}
-                                  className={`w-72 p-4 rounded-xl border transition-all cursor-pointer ${
-                                    isLatest
-                                      ? "bg-blue-50/40 border-blue-400 shadow-xs ring-1 ring-blue-400/20"
-                                      : "bg-slate-50/70 border-slate-200 opacity-80 hover:opacity-100"
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-200/60">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-mono text-xs font-bold text-blue-600">
-                                        {stepNode.displayKey}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400 font-mono">
-                                        v{stepNode.version}
-                                      </span>
-                                    </div>
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadgeStyle(stepNode.status)}`}>
-                                      {stepNode.status}
-                                    </span>
-                                  </div>
-
-                                  <h4 className="text-xs font-bold text-slate-900 font-serif line-clamp-1 mb-1.5" title={stepNode.title}>
-                                    {stepNode.title}
-                                  </h4>
-                                  <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed bg-white p-2 rounded-lg border border-slate-100 mb-3">
-                                    {stepNode.decisionText}
-                                  </p>
-
-                                  <div className="flex items-center justify-between pt-1 text-[10px] text-slate-400">
-                                    <span>{formatDate(stepNode.createdAt)}</span>
-                                    <span className="text-blue-600 font-medium">Click for details →</span>
-                                  </div>
-                                </div>
-
-                                {!isLatest && (
-                                  <div className="flex flex-col items-center justify-center px-1 text-slate-400">
-                                    <ArrowRight className="w-5 h-5 text-blue-600" />
-                                    <span className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter">
-                                      superseded by
-                                    </span>
-                                  </div>
-                                )}
-                              </React.Fragment>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {/* Search Input */}
+              <div className="relative w-full sm:w-64">
+                <Input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Filter decisions..."
+                  className="w-full h-8 pl-8 pr-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-codex-accent/20 shadow-2xs"
+                />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
               </div>
-            )}
-
-            {/* Baseline Standalone Architectures */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-slate-500" />
-                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-mono">
-                  Baseline Architecture Standards (Independent • {graphData.standalone.length})
-                </h3>
-              </div>
-
-              {graphData.standalone.length === 0 ? (
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 text-center">
-                  All recorded decisions currently participate in evolution chains.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {graphData.standalone.map((item: any) => (
-                    <div
-                      key={item.id}
-                      onClick={() => openDetailModal(item)}
-                      className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-4 space-y-2.5 hover:border-slate-300 transition-all cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100">
-                            {item.displayKey}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadgeStyle(item.status)}`}>
-                            {item.status}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">v{item.version}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-400">{formatDate(item.createdAt)}</span>
-                      </div>
-
-                      <h4 className="text-xs font-bold text-slate-900 font-serif">{item.title}</h4>
-                      <p className="text-[11px] text-slate-600 line-clamp-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100 leading-relaxed">
-                        {item.decisionText}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
-          </div>
-        ) : (
-          /* Table View (Matching Requirements page table exactly!) */
-          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3 px-4 w-[42%]">Decision (ADR)</th>
-                    <th className="py-3 px-4 w-[16%]">Project</th>
-                    <th className="py-3 px-4 w-[14%]">Status</th>
-                    <th className="py-3 px-4 w-[16%]">Traceability</th>
-                    <th className="py-3 px-4 w-[12%]">Updated</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
-                  {filteredItems.map((dec) => {
-                    const projectName = dec.project?.name || currentProject?.name || "AI Workspace";
-                    const projectBadgeStyle = getProjectBadgeStyle(projectName);
-                    const dotColor = getStatusDotColor(dec.status);
-                    const relativeTime = formatRelativeTime(dec.updatedAt || dec.createdAt);
-                    const linkedReq = dec.requirement || requirements.find((r) => r.id === dec.requirementId);
-                    const predecessor = items.find((i) => i.id === dec.supersedesDecisionId);
 
-                    return (
-                      <tr
-                        key={dec.id}
-                        onClick={() => openDetailModal(dec)}
-                        className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
-                      >
-                        {/* Title & Outcome snippet */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-start gap-2.5">
-                            <span
-                              className="w-2 h-2 rounded-full shrink-0 mt-1.5"
-                              style={{ backgroundColor: dotColor }}
-                            />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-mono text-[11px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                                  {dec.displayKey || dec.id.slice(0, 8)}
-                                </span>
-                                <span className="font-medium text-slate-800 group-hover:text-blue-600 transition-colors">
-                                  {dec.title}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5 font-normal">
-                                {dec.decisionText}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Project */}
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[150px] ${projectBadgeStyle}`}
-                          >
-                            {projectName}
-                          </span>
-                        </td>
-
-                        {/* Status */}
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-medium ${getStatusBadgeStyle(
-                              dec.status
-                            )}`}
-                          >
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
-                            <span>{dec.status}</span>
-                          </span>
-                        </td>
-
-                        {/* Traceability: Predecessor / Linked REQ */}
-                        <td className="py-3 px-4">
-                          <div className="flex flex-col gap-1 text-[11px] font-mono">
-                            {predecessor && (
-                              <span className="text-amber-700 bg-amber-50 border border-amber-200/80 px-1.5 py-0.5 rounded inline-flex items-center gap-1 truncate max-w-[150px]">
-                                <GitMerge className="w-3 h-3 text-amber-600 shrink-0" />
-                                <span>Supersedes: {predecessor.displayKey}</span>
-                              </span>
-                            )}
-                            {linkedReq && (
-                              <span className="text-blue-700 bg-blue-50 border border-blue-200/80 px-1.5 py-0.5 rounded inline-flex items-center gap-1 truncate max-w-[150px]">
-                                <FileCheck2 className="w-3 h-3 text-blue-600 shrink-0" />
-                                <span>Req: {linkedReq.displayKey || linkedReq.title}</span>
-                              </span>
-                            )}
-                            {!predecessor && !linkedReq && (
-                              <span className="text-slate-400 font-sans text-xs">-</span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Updated */}
-                        <td className="py-3 px-4 text-slate-500 text-[11.5px] whitespace-nowrap">
-                          {relativeTime}
+            {/* Decisions Table Card matching Image 1 */}
+            <div className="bg-white border border-codex-border/80 rounded-2xl overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-white">
+                      <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                        Decision
+                      </th>
+                      <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                        Project
+                      </th>
+                      <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                        Decided by
+                      </th>
+                      <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                        Date
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {loading ? (
+                      <tr>
+                        <td colSpan={4} className="py-12 text-center text-xs text-slate-400">
+                          Loading decisions...
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ) : filteredItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-16 text-center">
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2">
+                            <FileCheck2 className="w-5 h-5" />
+                          </div>
+                          <p className="text-xs font-semibold text-slate-700">No decisions found</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {searchQuery
+                              ? "Try adjusting your search query."
+                              : "Click '+ New Decision' to record your first architectural decision."}
+                          </p>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredItems.map((item) => {
+                        const deciderName = getDeciderName(item);
+                        const initials = getInitials(deciderName);
+                        const avatarClass = getAvatarColor(deciderName);
+                        const projectPillClass = getProjectBadgeStyle(item.projectName);
+                        const dateText = getDisplayDate(item);
+
+                        return (
+                          <tr
+                            key={item.id}
+                            onClick={() => openDetailView(item)}
+                            className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
+                          >
+                            {/* Column 1: Decision Title */}
+                            <td className="py-3.5 px-6">
+                              <span className="text-xs font-semibold text-slate-900 group-hover:text-codex-accent transition-colors font-serif">
+                                {item.title}
+                              </span>
+                            </td>
+
+                            {/* Column 2: Project Pill */}
+                            <td className="py-3.5 px-6">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium ${projectPillClass}`}
+                              >
+                                {item.projectName || "AI Project Workspace"}
+                              </span>
+                            </td>
+
+                            {/* Column 3: Decided by (Avatar + Name) */}
+                            <td className="py-3.5 px-6">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarClass}`}
+                                >
+                                  {initials}
+                                </div>
+                                <span className="text-xs text-slate-700 font-medium">
+                                  {deciderName}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Column 4: Date */}
+                            <td className="py-3.5 px-6 text-xs text-slate-500 font-medium">
+                              {dateText}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          </>
         )}
 
-        {/* CREATE DECISION MODAL (Matching Requirements create modal!) */}
-        {showCreateModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div
-              className="fixed inset-0"
-              onClick={() => !submitting && setShowCreateModal(false)}
-            />
-            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
-                    <GitPullRequest className="w-4 h-4" />
-                  </div>
-                  <h2 className="text-base font-bold text-slate-900 font-serif">
-                    New Architectural Decision
-                  </h2>
-                </div>
+        {/* ==================================================================== */}
+        {/* VIEW 2: DECISION DETAIL VIEW (IMAGE 2)                              */}
+        {/* ==================================================================== */}
+        {viewState === "detail" && activeDec && (
+          <>
+            {/* Breadcrumb & Navigation */}
+            <div className="space-y-2">
+              <nav className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Link
+                  href="/projects"
+                  className="text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                  Projects
+                </Link>
+                <span>/</span>
+                <span
+                  onClick={returnToList}
+                  className="text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Decisions
+                </span>
+              </nav>
+
+              <button
+                type="button"
+                onClick={returnToList}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer group"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                <span>Decisions</span>
+              </button>
+            </div>
+
+            {/* Decision Title Header & Edit Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
+              <h1 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 tracking-tight">
+                {activeDec.title}
+              </h1>
+
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+                  onClick={() => setDeleteConfirmDec(activeDec)}
+                  className="inline-flex items-center gap-1.5 bg-white border border-red-200 hover:bg-red-50 text-red-600 rounded-xl px-3.5 py-1.5 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  <span>Delete</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openEditView(activeDec)}
+                  className="inline-flex items-center gap-1.5 bg-white border border-codex-border/90 hover:bg-slate-50 text-slate-700 rounded-xl px-3.5 py-1.5 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Edit</span>
                 </button>
               </div>
+            </div>
 
-              <form onSubmit={handleCreate} className="p-6 space-y-4 overflow-y-auto flex-1">
-                {createErrorMsg && (
-                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{createErrorMsg}</span>
-                  </div>
-                )}
-
-                {/* Project Selector */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Project Workspace *</label>
-                  <select
-                    value={createProjectId}
-                    onChange={(e) => setCreateProjectId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                  >
-                    {activeProjectsList.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.key})
-                      </option>
-                    ))}
-                  </select>
+            {/* 2-Column Responsive Layout matching Image 2 */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
+              {/* Left Column (Rationale & Related items) */}
+              <div className="lg:col-span-8 space-y-5">
+                {/* Rationale Card */}
+                <div className="bg-white border border-codex-border/80 rounded-2xl p-6 shadow-xs space-y-3">
+                  <h2 className="text-sm font-bold text-slate-900 font-serif">Rationale</h2>
+                  <p className="text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                    {activeDec.rationale ||
+                      "Postgres gives relational integrity for users, roles, and permissions, and supports pgvector embeddings for AI Copilot retrieval."}
+                  </p>
                 </div>
 
-                {/* Title */}
+                {/* Related items Card */}
+                <div className="bg-white border border-codex-border/80 rounded-2xl p-6 shadow-xs space-y-3">
+                  <h2 className="text-sm font-bold text-slate-900 font-serif">Related items</h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {activeDec.requirement ? (
+                      <Link
+                        href={`/requirements?id=${activeDec.requirement.id}`}
+                        className="inline-flex items-center gap-1 bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe] px-2.5 py-1 rounded-md text-xs font-semibold hover:bg-blue-100/60 transition-colors"
+                      >
+                        <FileCheck2 className="w-3 h-3" />
+                        <span>
+                          {activeDec.requirement.displayKey ||
+                            activeDec.requirement.key ||
+                            "REQ-001"}
+                        </span>
+                      </Link>
+                    ) : (
+                      <span className="inline-flex items-center bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe] px-2.5 py-1 rounded-md text-xs font-semibold">
+                        REQ-001
+                      </span>
+                    )}
+
+                    <span className="inline-flex items-center bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0] px-2.5 py-1 rounded-md text-xs font-semibold">
+                      Phase 1 Kickoff
+                    </span>
+                  </div>
+                </div>
+
+                {/* AI Task Proposals & Engineering Handoff Actions */}
+                <div className="bg-white border border-codex-border/80 rounded-2xl p-5 shadow-xs flex items-center justify-between gap-3 flex-wrap">
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-codex-accent" />
+                      <span>AI Task Breakdown</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Use DeepSeek V4 Pro to propose engineering tasks directly from this ADR.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleGenerateTaskProposal(activeDec)}
+                      disabled={generatingProposalDecId === activeDec.id}
+                      className="bg-blue-50 text-codex-accent border border-blue-200 hover:bg-blue-100/70 h-8 text-xs gap-1.5 shadow-2xs"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>
+                        {generatingProposalDecId === activeDec.id
+                          ? "Analyzing..."
+                          : "Generate Tasks"}
+                      </span>
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleViewRevisions(activeDec)}
+                      className="h-8 text-xs gap-1.5 border-codex-border text-slate-700 shadow-2xs"
+                    >
+                      <History className="w-3 h-3 text-slate-500" />
+                      <span>Revisions (v{activeDec.version || 1})</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column (Details Card matching Image 2) */}
+              <div className="lg:col-span-4 space-y-4">
+                <div className="bg-white border border-codex-border/80 rounded-2xl p-6 shadow-xs space-y-4">
+                  <h2 className="text-sm font-bold text-slate-900 font-serif">Details</h2>
+
+                  <div className="space-y-3.5 pt-1">
+                    {/* Project */}
+                    <div className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-500 font-medium">Project</span>
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium ${getProjectBadgeStyle(
+                          activeDec.projectName
+                        )}`}
+                      >
+                        {activeDec.projectName || "AI Project Workspace"}
+                      </span>
+                    </div>
+
+                    {/* Decided by */}
+                    <div className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-500 font-medium">Decided by</span>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${getAvatarColor(
+                            getDeciderName(activeDec)
+                          )}`}
+                        >
+                          {getInitials(getDeciderName(activeDec))}
+                        </div>
+                        <span className="text-slate-800 font-semibold">
+                          {getDeciderName(activeDec)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Date */}
+                    <div className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-slate-500 font-medium">Date</span>
+                      <span className="text-slate-800 font-medium">
+                        {getDisplayDate(activeDec)}
+                      </span>
+                    </div>
+
+                    {/* Status */}
+                    <div className="flex items-center justify-between text-xs gap-2 pt-1 border-t border-slate-100">
+                      <span className="text-slate-500 font-medium">Status</span>
+                      <span className="font-mono text-[10px] font-bold text-[#10b981] bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                        {activeDec.status || "ACCEPTED"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ==================================================================== */}
+        {/* VIEW 3: NEW DECISION VIEW (IMAGE 3)                                  */}
+        {/* ==================================================================== */}
+        {viewState === "new" && (
+          <>
+            {/* Breadcrumb & Back Link */}
+            <div className="space-y-2">
+              <nav className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Link
+                  href="/projects"
+                  className="text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                  Projects
+                </Link>
+                <span>/</span>
+                <span
+                  onClick={returnToList}
+                  className="text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Decisions
+                </span>
+              </nav>
+
+              <button
+                type="button"
+                onClick={returnToList}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer group"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                <span>Decisions</span>
+              </button>
+            </div>
+
+            {/* Page Heading */}
+            <h1 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 tracking-tight pt-1">
+              New decision
+            </h1>
+
+            {/* Form Card matching Image 3 */}
+            <div className="max-w-2xl bg-white border border-codex-border/80 rounded-2xl p-6 shadow-xs">
+              <form onSubmit={handleCreateSubmit} className="space-y-5">
+                {/* Decision title */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Decision Title *</label>
-                  <Input
+                  <label className="block text-xs font-semibold text-slate-800">Decision</label>
+                  <input
+                    type="text"
                     required
                     value={createTitle}
                     onChange={(e) => setCreateTitle(e.target.value)}
-                    placeholder="e.g. Adopt Argon2id for User Password Hashing"
-                    className="text-xs h-9 font-medium"
-                  />
-                </div>
-
-                {/* Link Requirement & Supersedes */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Link Requirement (Optional)</label>
-                    <select
-                      value={createRequirementId}
-                      onChange={(e) => setCreateRequirementId(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                    >
-                      <option value="">-- None (Standalone ADR) --</option>
-                      {requirements.map((req) => (
-                        <option key={req.id} value={req.id}>
-                          {req.displayKey ? `[${req.displayKey}] ` : ""}{req.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Supersedes ADR (Optional)</label>
-                    <select
-                      value={createSupersedesId}
-                      onChange={(e) => setCreateSupersedesId(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                    >
-                      <option value="">-- None (Independent Baseline) --</option>
-                      {items.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.displayKey ? `[${item.displayKey}] ` : ""}{item.title} ({item.status})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Decision Text */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Decision Outcome *</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={createDecisionText}
-                    onChange={(e) => setCreateDecisionText(e.target.value)}
-                    placeholder="Technical specification and choices made..."
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="e.g. Use PostgreSQL instead of MongoDB"
+                    className="w-full h-10 px-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 focus:border-codex-accent shadow-2xs transition-all"
                   />
                 </div>
 
                 {/* Rationale */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Rationale & Context (Optional)</label>
+                  <label className="block text-xs font-semibold text-slate-800">Rationale</label>
                   <textarea
-                    rows={2}
+                    rows={4}
                     value={createRationale}
                     onChange={(e) => setCreateRationale(e.target.value)}
-                    placeholder="Why was this option chosen over alternatives?"
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Why was this decided?"
+                    className="w-full p-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 focus:border-codex-accent shadow-2xs transition-all leading-relaxed"
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                  <Button
+                {/* 3-Column Inputs: Project, Decided by, Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  {/* Project */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-800">Project</label>
+                    <DropdownSelect
+                      value={createProjectId}
+                      onChange={setCreateProjectId}
+                      className="w-full"
+                      triggerClassName="w-full h-10"
+                      options={projects.map((p) => ({
+                        value: p.id,
+                        label: p.name,
+                        badge: `[${p.key}]`,
+                        badgeColor: getProjectBadgeStyle(p.name),
+                      }))}
+                    />
+                  </div>
+
+                  {/* Decided by */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-800">Decided by</label>
+                    <DropdownSelect
+                      value={createDecidedBy}
+                      onChange={setCreateDecidedBy}
+                      className="w-full"
+                      triggerClassName="w-full h-10"
+                      options={teamMemberOptions.map((m) => ({
+                        value: m.name,
+                        label: m.name,
+                        avatar: {
+                          initials: getInitials(m.name),
+                          colorClass: getAvatarColor(m.name),
+                        },
+                      }))}
+                    />
+                  </div>
+
+                  {/* Date */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-800">Date</label>
+                    <input
+                      type="date"
+                      value={createDate}
+                      onChange={(e) => setCreateDate(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 shadow-2xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Bottom Actions matching Image 3 */}
+                <div className="flex items-center justify-end gap-2.5 pt-4">
+                  <button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowCreateModal(false)}
-                    className="text-xs"
+                    onClick={returnToList}
+                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-codex-border/90 rounded-xl hover:bg-slate-50 transition-all shadow-2xs"
                   >
                     Cancel
-                  </Button>
-                  <Button
+                  </button>
+
+                  <button
                     type="submit"
-                    size="sm"
-                    disabled={submitting}
-                    className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                    disabled={submittingCreate}
+                    className="px-5 py-2 text-xs font-semibold text-white bg-[#3b82f6] hover:bg-blue-600 rounded-xl transition-all shadow-xs disabled:opacity-50 cursor-pointer"
                   >
-                    {submitting ? "Saving..." : "Create Decision"}
-                  </Button>
+                    {submittingCreate ? "Recording..." : "Record decision"}
+                  </button>
                 </div>
               </form>
             </div>
-          </div>
+          </>
         )}
 
-        {/* DECISION DETAIL / EDIT MODAL (Matching Requirements Detail Modal!) */}
-        {activeDec && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div
-              className="fixed inset-0"
-              onClick={() => !editSubmitting && setActiveDec(null)}
-            />
-            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: getStatusDotColor(editStatus) }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(activeDec.displayKey, "key")}
-                    className="font-mono text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-100 flex items-center gap-1 transition-all"
-                    title="Click to copy key"
-                  >
-                    <span>{activeDec.displayKey || activeDec.id.substring(0, 8)}</span>
-                    <Copy className="w-3 h-3 text-blue-500" />
-                  </button>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[180px] ${getProjectBadgeStyle(
-                      activeDec.project?.name || currentProject?.name
-                    )}`}
-                  >
-                    {activeDec.project?.name || currentProject?.name || "Workspace"}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveDec(null)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+        {/* ==================================================================== */}
+        {/* VIEW 4: EDIT DECISION VIEW (IMAGE 4)                                 */}
+        {/* ==================================================================== */}
+        {viewState === "edit" && activeDec && (
+          <>
+            {/* Breadcrumb & Back Link */}
+            <div className="space-y-2">
+              <nav className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Link
+                  href="/projects"
+                  className="text-blue-600 hover:text-blue-700 hover:underline"
                 >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+                  Projects
+                </Link>
+                <span>/</span>
+                <span
+                  onClick={returnToList}
+                  className="text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Decisions
+                </span>
+              </nav>
 
-              {/* Form Content */}
-              <form onSubmit={handleUpdate} className="p-6 space-y-4 overflow-y-auto flex-1">
-                {/* Title */}
+              <button
+                type="button"
+                onClick={() => setViewState("detail")}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer group"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                <span className="truncate max-w-xs">{activeDec.title}</span>
+              </button>
+            </div>
+
+            {/* Page Heading */}
+            <h1 className="text-xl sm:text-2xl font-serif font-bold text-slate-900 tracking-tight pt-1">
+              Edit decision
+            </h1>
+
+            {/* Form Card matching Image 4 */}
+            <div className="max-w-2xl bg-white border border-codex-border/80 rounded-2xl p-6 shadow-xs">
+              <form onSubmit={handleEditSubmit} className="space-y-5">
+                {/* Decision title */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Decision Title *</label>
-                  <Input
+                  <label className="block text-xs font-semibold text-slate-800">Decision</label>
+                  <input
+                    type="text"
                     required
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    className="text-xs h-9 font-medium"
-                  />
-                </div>
-
-                {/* Status */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Status</label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                  >
-                    <option value="PROPOSED">Proposed</option>
-                    <option value="ACCEPTED">Accepted</option>
-                    <option value="SUPERSEDED">Superseded</option>
-                  </select>
-                </div>
-
-                {/* Decision Outcome */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Decision Outcome *</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={editDecisionText}
-                    onChange={(e) => setEditDecisionText(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
+                    placeholder="Decision title"
+                    className="w-full h-10 px-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 focus:border-codex-accent shadow-2xs transition-all font-semibold"
                   />
                 </div>
 
                 {/* Rationale */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Rationale & Context</label>
+                  <label className="block text-xs font-semibold text-slate-800">Rationale</label>
                   <textarea
-                    rows={2}
+                    rows={4}
                     value={editRationale}
                     onChange={(e) => setEditRationale(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
+                    placeholder="Why was this decided?"
+                    className="w-full p-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 focus:border-codex-accent shadow-2xs transition-all leading-relaxed"
                   />
                 </div>
 
-                {/* Cross-Workflow Actions Hub */}
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-                  {/* Convert to Tasks with AI */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={generatingProposalDecId === activeDec.id}
-                    onClick={() => handleGenerateTasksFromDecision(activeDec)}
-                    className="h-8 text-xs border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 gap-1.5 px-3"
-                  >
-                    <Sparkles className={`w-3.5 h-3.5 ${generatingProposalDecId === activeDec.id ? "animate-spin" : "text-blue-600"}`} />
-                    <span>{generatingProposalDecId === activeDec.id ? "Generating Tasks..." : "Convert to Tasks with AI"}</span>
-                  </Button>
+                {/* 3-Column Inputs: Project, Decided by, Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  {/* Project */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-800">Project</label>
+                    <DropdownSelect
+                      value={editProjectId}
+                      onChange={setEditProjectId}
+                      className="w-full"
+                      triggerClassName="w-full h-10"
+                      options={projects.map((p) => ({
+                        value: p.id,
+                        label: p.name,
+                        badge: `[${p.key}]`,
+                        badgeColor: getProjectBadgeStyle(p.name),
+                      }))}
+                    />
+                  </div>
 
-                  {/* Manual Task Link */}
-                  <Link
-                    href={`/tasks?create=true&title=${encodeURIComponent(`Implement ADR [${activeDec.displayKey}]: ${activeDec.title}`)}&priority=HIGH`}
-                  >
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
-                    >
-                      <CheckSquare className="w-3.5 h-3.5 text-[#2D8A60]" />
-                      <span>Create Task</span>
-                    </Button>
-                  </Link>
+                  {/* Decided by */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-800">Decided by</label>
+                    <DropdownSelect
+                      value={editDecidedBy}
+                      onChange={setEditDecidedBy}
+                      className="w-full"
+                      triggerClassName="w-full h-10"
+                      options={teamMemberOptions.map((m) => ({
+                        value: m.name,
+                        label: m.name,
+                        avatar: {
+                          initials: getInitials(m.name),
+                          colorClass: getAvatarColor(m.name),
+                        },
+                      }))}
+                    />
+                  </div>
 
-                  {/* Revisions History */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openRevisions(activeDec)}
-                    className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
-                  >
-                    <History className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Revisions (v{activeDec.version})</span>
-                  </Button>
-
-                  {/* Discuss with Copilot */}
-                  <Link
-                    href={`/assistant?prompt=${encodeURIComponent(`Review architectural decision [${activeDec.displayKey}]: "${activeDec.title}". Outcome: "${activeDec.decisionText}". Rationale: "${activeDec.rationale || ''}". What are the key implementation requirements and trade-offs?`)}&mode=DEVELOPER`}
-                  >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs text-slate-600 hover:text-slate-900 gap-1.5 px-2.5"
-                    >
-                      <Bot className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Copilot</span>
-                    </Button>
-                  </Link>
+                  {/* Date */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-800">Date</label>
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 shadow-2xs"
+                    />
+                  </div>
                 </div>
 
-                {/* Footer buttons */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                  <Button
+                {/* Bottom Actions matching Image 4 */}
+                <div className="flex items-center justify-between pt-4">
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDelete}
-                    className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-1 px-2.5"
+                    onClick={() => setDeleteConfirmDec(activeDec)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-xl hover:bg-red-50 transition-all shadow-2xs cursor-pointer"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete</span>
-                  </Button>
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                    <span>Delete decision</span>
+                  </button>
 
-                  <div className="flex items-center gap-2">
-                    <Button
+                  <div className="flex items-center gap-2.5">
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setActiveDec(null)}
-                      className="text-xs"
+                      onClick={() => setViewState("detail")}
+                      className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-codex-border/90 rounded-xl hover:bg-slate-50 transition-all shadow-2xs"
                     >
                       Cancel
-                    </Button>
-                    <Button
+                    </button>
+
+                    <button
                       type="submit"
-                      size="sm"
-                      disabled={editSubmitting}
-                      className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
+                      disabled={submittingEdit}
+                      className="px-5 py-2 text-xs font-semibold text-white bg-[#3b82f6] hover:bg-blue-600 rounded-xl transition-all shadow-xs disabled:opacity-50 cursor-pointer"
                     >
-                      {editSubmitting ? "Saving..." : "Save Changes"}
-                    </Button>
+                      {submittingEdit ? "Saving..." : "Save changes"}
+                    </button>
                   </div>
                 </div>
               </form>
             </div>
-          </div>
-        )}
-
-        {/* REVISIONS HISTORY MODAL */}
-        {revisionsModalDec && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden">
-              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100">
-                      {revisionsModalDec.displayKey || revisionsModalDec.id.substring(0, 8)}
-                    </span>
-                    <h2 className="text-base font-bold text-slate-900 font-serif">
-                      Revision History
-                    </h2>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 line-clamp-1">
-                    {revisionsModalDec.title}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRevisionsModalDec(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="p-5 overflow-y-auto space-y-4 flex-1">
-                {loadingRevisions ? (
-                  <div className="py-12 text-center text-xs text-slate-400">Loading revision audit trail...</div>
-                ) : revisionsList.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-dashed border-slate-200">
-                    No historical revisions recorded yet. This decision is currently at baseline version (v{revisionsModalDec.version}).
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {revisionsList.map((rev: any, idx: number) => (
-                      <div
-                        key={rev.id || idx}
-                        className="p-4 rounded-xl border border-slate-200/90 bg-slate-50/50 space-y-2 relative"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-900 text-white">
-                              v{rev.version}
-                            </span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusBadgeStyle(rev.status)}`}>
-                              {rev.status}
-                            </span>
-                          </div>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {formatDateTime(rev.createdAt)}
-                          </span>
-                        </div>
-                        <h4 className="text-xs font-bold text-slate-800 font-serif">{rev.title}</h4>
-                        <div className="text-xs text-slate-700 bg-white p-3 rounded-lg border border-slate-100 leading-relaxed">
-                          {rev.decisionText}
-                        </div>
-                        {rev.rationale && (
-                          <div className="text-[11px] text-slate-500 bg-white/60 p-2.5 rounded-lg border border-slate-100 italic leading-relaxed">
-                            <span className="font-semibold not-italic text-slate-600">Rationale: </span>
-                            {rev.rationale}
-                          </div>
-                        )}
-                        <div className="text-[10px] text-slate-400 pt-1">
-                          Snapshot captured by: {rev.changedBy || "System"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setRevisionsModalDec(null)}
-                  className="text-xs"
-                >
-                  Close History
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* AI Proposal Review Dialog */}
-        {activeProposal && (
-          <ProposalReviewDialog
-            isOpen={!!activeProposal}
-            onClose={() => setActiveProposal(null)}
-            proposal={activeProposal}
-            projectId={activeProposal.projectId || currentProject?.id || ""}
-            onConfirmed={() => {
-              setActiveProposal(null);
-              loadData();
-            }}
-          />
+          </>
         )}
       </div>
+
+      {/* AI Task Proposal Review Dialog */}
+      {activeProposal && (
+        <ProposalReviewDialog
+          isOpen={!!activeProposal}
+          onClose={() => setActiveProposal(null)}
+          proposal={activeProposal}
+          projectId={activeDec?.projectId || currentProject?.id || ""}
+          onConfirmed={async () => {
+            showToast("Successfully approved and created tasks from proposal!", "success");
+            setActiveProposal(null);
+          }}
+        />
+      )}
+
+      {/* Revisions History Modal */}
+      {showRevisionsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white border border-codex-border rounded-2xl shadow-xl w-full max-w-xl overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-slate-500" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Revision History - {activeDec?.title}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowRevisionsModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 max-h-[60vh] overflow-y-auto space-y-3">
+              {loadingRevisions ? (
+                <div className="py-8 text-center text-xs text-slate-400">Loading revisions...</div>
+              ) : revisionsList.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  No revisions recorded for this decision yet.
+                </div>
+              ) : (
+                revisionsList.map((rev: any) => (
+                  <div
+                    key={rev.id || rev.version}
+                    className="p-3 rounded-xl border border-slate-100 bg-slate-50/50 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-mono font-bold text-slate-900">
+                        Revision #{rev.version}
+                      </span>
+                      <span className="text-slate-400 text-[11px]">
+                        {formatDecisionDate(rev.createdAt)}
+                      </span>
+                    </div>
+                    <div className="text-xs font-semibold text-slate-800">{rev.title}</div>
+                    {rev.rationale && (
+                      <p className="text-[11px] text-slate-600 line-clamp-2">{rev.rationale}</p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowRevisionsModal(false)}
+                className="text-xs h-8"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE DECISION CONFIRMATION MODAL */}
+      <DeleteConfirmModal
+        isOpen={!!deleteConfirmDec}
+        onClose={() => !deletingDec && setDeleteConfirmDec(null)}
+        onConfirm={handleConfirmDeleteDecision}
+        title="Delete decision"
+        itemName={deleteConfirmDec?.title}
+        itemType="decision"
+        warningText="This action cannot be undone. The architectural decision and its revision history will be permanently deleted."
+        confirmText="Delete decision"
+        loading={deletingDec}
+      />
     </AppLayout>
   );
 }

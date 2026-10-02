@@ -8,6 +8,7 @@ import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import { api } from "@/lib/api";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import {
   Upload,
   Download,
@@ -214,7 +215,7 @@ export default function DocumentsPage() {
   // Selected document detail modal
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
 
-  // Delete confirmation modal state ("Indexing Status")
+  // Delete confirmation modal state
   const [deleteConfirmDoc, setDeleteConfirmDoc] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -389,7 +390,7 @@ export default function DocumentsPage() {
     }
   };
 
-  // Delete handler - opens custom Indexing Status confirmation modal
+  // Delete handler - opens custom delete confirmation modal
   const handleDelete = (doc: any, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setDeleteConfirmDoc(doc);
@@ -1329,75 +1330,18 @@ export default function DocumentsPage() {
           document.body
         )}
 
-        {/* DELETE CONFIRMATION MODAL ("Indexing Status" matching screenshot) */}
-        {mounted &&
-          deleteConfirmDoc &&
-          createPortal(
-            <div className="fixed inset-0 z-[120] bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-              <div
-                className="fixed inset-0"
-                onClick={() => !deleting && setDeleteConfirmDoc(null)}
-              />
-              <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 sm:p-7 border border-slate-100 overflow-hidden z-10 animate-in fade-in zoom-in-95">
-                {/* Header */}
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-bold font-serif text-slate-900 tracking-tight">
-                      Indexing Status
-                    </h3>
-                    <p className="text-sm sm:text-base text-slate-600 font-normal mt-1">
-                      “{deleteConfirmDoc.originalFilename || deleteConfirmDoc.title}” will be permanently removed.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={deleting}
-                    onClick={() => setDeleteConfirmDoc(null)}
-                    className="text-slate-400 hover:text-slate-600 transition-colors p-1 -mr-1 -mt-1 cursor-pointer disabled:opacity-50"
-                    aria-label="Close dialog"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* Warning Banner */}
-                <div className="mt-4 rounded-xl border border-[#e57373] bg-[#fbf0ef] px-4 py-3.5 flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-[#c53929] shrink-0 mt-0.5 stroke-[2.2]" />
-                  <p className="text-sm leading-relaxed text-[#c53929] font-normal">
-                    This can&apos;t be undone. If it&apos;s already indexed, the AI Copilot will no longer be able to reference it once that feature ships.
-                  </p>
-                </div>
-
-                {/* Footer Buttons */}
-                <div className="flex items-center justify-end gap-3 mt-6">
-                  <button
-                    type="button"
-                    disabled={deleting}
-                    onClick={() => setDeleteConfirmDoc(null)}
-                    className="px-5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-900 text-sm font-semibold transition-colors cursor-pointer bg-white disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={deleting}
-                    onClick={handleConfirmDelete}
-                    className="px-5 py-2.5 rounded-xl bg-[#c53929] hover:bg-[#b03022] text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {deleting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Deleting...</span>
-                      </>
-                    ) : (
-                      <span>Delete document</span>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
+        {/* DELETE CONFIRMATION MODAL */}
+        <DeleteConfirmModal
+          isOpen={!!deleteConfirmDoc}
+          onClose={() => !deleting && setDeleteConfirmDoc(null)}
+          onConfirm={handleConfirmDelete}
+          title="Delete document"
+          itemName={deleteConfirmDoc?.originalFilename || deleteConfirmDoc?.title}
+          itemType="document"
+          warningText="This action cannot be undone. If it is already indexed, the AI Copilot will no longer be able to reference it."
+          confirmText="Delete document"
+          loading={deleting}
+        />
       </div>
     </AppLayout>
   );

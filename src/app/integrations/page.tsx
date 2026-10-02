@@ -43,6 +43,9 @@ import {
   MessageSquareQuote,
   FileText,
   Calendar,
+  GitPullRequest,
+  GitBranch,
+  FileCode,
 } from "lucide-react";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { ConfirmModal } from "@/components/confirm-modal";
@@ -205,13 +208,22 @@ export default function IntegrationsPage() {
     }
   };
 
-  // GitHub state
-  const [connection, setConnection] = useState<any>(null);
+  // GitHub state (Multi-Repo, PRs, Codebase)
+  const [connections, setConnections] = useState<any[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [loadingConnection, setLoadingConnection] = useState(true);
   const [issues, setIssues] = useState<any[]>([]);
   const [totalIssues, setTotalIssues] = useState(0);
   const [loadingIssues, setLoadingIssues] = useState(false);
+  const [pullRequests, setPullRequests] = useState<any[]>([]);
+  const [totalPrs, setTotalPrs] = useState(0);
+  const [loadingPrs, setLoadingPrs] = useState(false);
+  const [repoFiles, setRepoFiles] = useState<any[]>([]);
+  const [totalFiles, setTotalFiles] = useState(0);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [githubSubTab, setGithubSubTab] = useState<"issues" | "pulls" | "code">("issues");
   const [syncing, setSyncing] = useState(false);
+  const [syncingCode, setSyncingCode] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [showConnectForm, setShowConnectForm] = useState(false);
@@ -220,7 +232,10 @@ export default function IntegrationsPage() {
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [selectedState, setSelectedState] = useState<string>("all");
+  const [prState, setPrState] = useState<string>("all");
   const [issueSearchQuery, setIssueSearchQuery] = useState("");
+  const [prSearchQuery, setPrSearchQuery] = useState("");
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
   const [expandedIssues, setExpandedIssues] = useState<Record<string, boolean>>({});
 
   // MCP state
@@ -238,31 +253,44 @@ export default function IntegrationsPage() {
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
 
-  // Load GitHub connection
-  const loadConnection = useCallback(async () => {
+  // Active Connection for multi-repo
+  const activeConnection =
+    connections.find((c) => c.id === selectedConnectionId) ||
+    connections[0] ||
+    null;
+  const isGithubConnected = !!activeConnection && activeConnection.status === "CONNECTED";
+
+  // Load GitHub connections
+  const loadConnections = useCallback(async () => {
     if (!currentProject) return;
     setLoadingConnection(true);
     try {
-      const conn = await api.integrations.github.getConnection(currentProject.id);
-      setConnection(conn);
-      if (conn && conn.status === "CONNECTED") {
-        loadIssues(conn);
+      const list = await api.integrations.github.listConnections(currentProject.id);
+      const conns = Array.isArray(list) ? list : [];
+      setConnections(conns);
+      if (conns.length > 0) {
+        if (!selectedConnectionId || !conns.some((c) => c.id === selectedConnectionId)) {
+          setSelectedConnectionId(conns[0].id);
+        }
       } else {
+        setSelectedConnectionId(null);
         setIssues([]);
+        setPullRequests([]);
+        setRepoFiles([]);
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Failed to load GitHub connections:", err);
     } finally {
       setLoadingConnection(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject]);
+  }, [currentProject, selectedConnectionId]);
 
-  const loadIssues = async (activeConn?: any) => {
+  const loadIssues = useCallback(async (connId?: string) => {
     if (!currentProject) return;
     setLoadingIssues(true);
     try {
       const res = await api.integrations.github.listIssues(currentProject.id, {
+        connectionId: connId,
         state: selectedState !== "all" ? selectedState : undefined,
         q: issueSearchQuery.trim() || undefined,
         limit: 50,
@@ -270,11 +298,48 @@ export default function IntegrationsPage() {
       setIssues(res.items || []);
       setTotalIssues(res.total ?? res.items?.length ?? 0);
     } catch (err: any) {
-      console.error(err);
+      console.error("Failed to load issues:", err);
     } finally {
       setLoadingIssues(false);
     }
-  };
+  }, [currentProject, selectedState, issueSearchQuery]);
+
+  const loadPullRequests = useCallback(async (connId?: string) => {
+    if (!currentProject) return;
+    setLoadingPrs(true);
+    try {
+      const res = await api.integrations.github.listPullRequests(currentProject.id, {
+        connectionId: connId,
+        state: prState !== "all" ? prState : undefined,
+        q: prSearchQuery.trim() || undefined,
+        limit: 50,
+      });
+      setPullRequests(res.items || []);
+      setTotalPrs(res.total ?? res.items?.length ?? 0);
+    } catch (err: any) {
+      console.error("Failed to load PRs:", err);
+    } finally {
+      setLoadingPrs(false);
+    }
+  }, [currentProject, prState, prSearchQuery]);
+
+  const loadFiles = useCallback(async (connId?: string) => {
+    if (!currentProject) return;
+    setLoadingFiles(true);
+    try {
+      const res = await api.integrations.github.listFiles(currentProject.id, {
+        connectionId: connId,
+        q: fileSearchQuery.trim() || undefined,
+        limit: 50,
+      });
+      setRepoFiles(res.items || []);
+      setTotalFiles(res.total ?? res.items?.length ?? 0);
+    } catch (err: any) {
+      console.error("Failed to load files:", err);
+    } finally {
+      setLoadingFiles(false);
+    }
+  }, [currentProject, fileSearchQuery]);
 
   // Load Personal Access Tokens
   const loadApiKeys = useCallback(async () => {
@@ -290,23 +355,24 @@ export default function IntegrationsPage() {
   }, []);
 
   useEffect(() => {
-    loadConnection();
+    loadConnections();
     loadApiKeys();
-  }, [loadConnection, loadApiKeys]);
+  }, [loadConnections, loadApiKeys]);
 
   useEffect(() => {
-    if (connection && connection.status === "CONNECTED") {
-      loadIssues(connection);
+    if (activeConnection && activeConnection.status === "CONNECTED") {
+      loadIssues(activeConnection.id);
+      loadPullRequests(activeConnection.id);
+      loadFiles(activeConnection.id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedState]);
+  }, [activeConnection, selectedState, prState, loadIssues, loadPullRequests, loadFiles]);
 
   const handleConnectGithub = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentProject || !owner.trim() || !repo.trim()) return;
     setConnecting(true);
     try {
-      await api.integrations.github.connect(currentProject.id, {
+      const newConn = await api.integrations.github.connect(currentProject.id, {
         repositoryOwner: owner.trim(),
         repositoryName: repo.trim(),
         accessToken: token.trim() || undefined,
@@ -316,7 +382,8 @@ export default function IntegrationsPage() {
       setOwner("");
       setRepo("");
       setToken("");
-      await loadConnection();
+      setSelectedConnectionId(newConn.id);
+      await loadConnections();
     } catch (err: any) {
       showToast(err.message || "Failed to connect repository", "error");
     } finally {
@@ -325,12 +392,17 @@ export default function IntegrationsPage() {
   };
 
   const handleSyncGithub = async () => {
-    if (!currentProject) return;
+    if (!currentProject || !activeConnection) return;
     setSyncing(true);
     try {
-      const res = await api.integrations.github.sync(currentProject.id);
-      showToast(`Sync completed: ${res.syncedCount ?? 0} issues synchronized!`, "success");
-      await loadConnection();
+      const res = await api.integrations.github.sync(currentProject.id, activeConnection.id);
+      showToast(
+        `Sync completed: ${res.syncedCount ?? 0} issues and ${res.syncedPrCount ?? 0} PRs synchronized!`,
+        "success"
+      );
+      await loadConnections();
+      await loadIssues(activeConnection.id);
+      await loadPullRequests(activeConnection.id);
     } catch (err: any) {
       showToast(err.message || "Sync failed", "error");
     } finally {
@@ -338,16 +410,32 @@ export default function IntegrationsPage() {
     }
   };
 
+  const handleSyncCodebase = async () => {
+    if (!currentProject || !activeConnection) return;
+    setSyncingCode(true);
+    try {
+      const res = await api.integrations.github.syncCode(currentProject.id, activeConnection.id);
+      showToast(
+        `Indexed ${res.indexedFilesCount ?? 0} repository files into vector memory!`,
+        "success"
+      );
+      await loadConnections();
+      await loadFiles(activeConnection.id);
+    } catch (err: any) {
+      showToast(err.message || "Codebase indexing failed", "error");
+    } finally {
+      setSyncingCode(false);
+    }
+  };
+
   const handleDisconnectGithub = async () => {
-    if (!currentProject) return;
+    if (!currentProject || !activeConnection) return;
     setDisconnecting(true);
     try {
-      await api.integrations.github.disconnect(currentProject.id);
+      await api.integrations.github.disconnect(currentProject.id, activeConnection.id);
       showToast("Repository disconnected successfully", "info");
-      setConnection(null);
-      setIssues([]);
-      setTotalIssues(0);
       setShowDisconnectConfirm(false);
+      await loadConnections();
     } catch (err: any) {
       showToast(err.message || "Failed to disconnect", "error");
     } finally {
@@ -603,7 +691,6 @@ export default function IntegrationsPage() {
   const antigravityCommand = `agy mcp add ai-workspace -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js" -e AI_WORKSPACE_API_URL="${apiBaseUrl}" -e AI_WORKSPACE_API_KEY="${activeTokenValue}" -e AI_WORKSPACE_PROJECT_ID="${projectKey}"`;
 
   // App catalog data
-  const isGithubConnected = connection && connection.status === "CONNECTED";
   const installedCount = 2;
 
   const searchQuery = directorySearch.trim().toLowerCase();
@@ -800,18 +887,18 @@ export default function IntegrationsPage() {
                             </div>
                             <div>
                               <h3 className="text-sm font-bold text-slate-900 font-serif group-hover:text-blue-600 transition-colors">
-                                GitHub Issues Sync
+                                GitHub Code & Repos
                               </h3>
                               <span className="text-[11px] text-slate-400 font-mono">
-                                Repository Knowledge
+                                Multi-Repo & Codebase
                               </span>
                             </div>
                           </div>
 
-                          {isGithubConnected ? (
+                          {connections.length > 0 ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
                               <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                              Connected
+                              {connections.length} {connections.length === 1 ? "Repo" : "Repos"} Connected
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
@@ -821,18 +908,18 @@ export default function IntegrationsPage() {
                         </div>
 
                         <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                          Synchronize GitHub issues and discussions directly into your project&apos;s vector knowledge base for AI Copilot context retrieval and citation evidence.
+                          Synchronize multiple repositories, pull requests, issue discussions, and source code files directly into vector memory for AI Copilot context and evidence citations.
                         </p>
                       </div>
 
                       <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                            REST v3
+                            REST + Git Trees
                           </span>
-                          {isGithubConnected && (
+                          {connections.length > 0 && (
                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              {connection.issueCount ?? totalIssues} Synced
+                              {totalIssues} Issues • {totalPrs} PRs
                             </span>
                           )}
                         </div>
@@ -842,7 +929,7 @@ export default function IntegrationsPage() {
                           variant="outline"
                           className="h-7 text-xs border-slate-200 hover:bg-slate-50 gap-1 text-slate-700 font-medium"
                         >
-                          <span>{isGithubConnected ? "Manage Sync" : "Connect"}</span>
+                          <span>{connections.length > 0 ? "Manage Repos" : "Connect"}</span>
                           <ChevronRight className="w-3 h-3" />
                         </Button>
                       </div>
@@ -1455,25 +1542,38 @@ export default function IntegrationsPage() {
                   </div>
                   <div>
                     <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
-                      GitHub Issues Sync
+                      GitHub Engineering Hub
                     </h1>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Synchronize repository issues into vector memory and cite them as authorized evidence.
+                      Multi-repository synchronization for issues, pull requests, and codebase indexing into vector memory.
                     </p>
                   </div>
                 </div>
 
                 {isGithubConnected && (
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={syncing}
                       onClick={handleSyncGithub}
                       className="h-8 text-xs border-slate-200 hover:bg-slate-50 text-slate-700 gap-1.5 shadow-2xs font-medium"
+                      title="Sync Issues and Pull Requests"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-                      <span>{syncing ? "Syncing..." : "Sync Issues"}</span>
+                      <span>{syncing ? "Syncing..." : "Sync Issues & PRs"}</span>
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={syncingCode}
+                      onClick={handleSyncCodebase}
+                      className="h-8 text-xs border-blue-200 hover:bg-blue-50 text-blue-700 gap-1.5 shadow-2xs font-medium"
+                      title="Index codebase files into vector memory"
+                    >
+                      <Code2 className={`w-3.5 h-3.5 ${syncingCode ? "animate-spin text-blue-600" : "text-blue-600"}`} />
+                      <span>{syncingCode ? "Indexing Code..." : "Index Codebase"}</span>
                     </Button>
 
                     <Button
@@ -1491,117 +1591,116 @@ export default function IntegrationsPage() {
               </div>
             </div>
 
+            {/* Multi-Repo Switcher Bar */}
+            {connections.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                  <span className="text-xs font-semibold text-slate-500 whitespace-nowrap pl-1">
+                    Repositories:
+                  </span>
+                  {connections.map((c) => {
+                    const isSelected = c.id === activeConnection?.id;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => setSelectedConnectionId(c.id)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
+                          isSelected
+                            ? "bg-slate-900 text-white shadow-xs"
+                            : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 hover:border-slate-300"
+                        }`}
+                      >
+                        <GithubIcon className={`w-3.5 h-3.5 ${isSelected ? "text-white" : "text-slate-600"}`} />
+                        <span>{c.repositoryOwner}/{c.repositoryName}</span>
+                        <span
+                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                            isSelected ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {c.issueCount ?? 0}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowConnectForm(!showConnectForm)}
+                  className="h-7 text-xs border-slate-200 hover:bg-white text-slate-700 gap-1.5 shrink-0 self-start sm:self-center"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Connect Another Repo</span>
+                </Button>
+              </div>
+            )}
+
             {/* Connection Status or Connect Form */}
             {loadingConnection ? (
               <div className="h-36 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-            ) : isGithubConnected ? (
-              <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl">
-                <CardHeader className="p-5 pb-3 border-b border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={`https://github.com/${connection.repositoryOwner}/${connection.repositoryName}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1.5 font-serif"
-                        >
-                          <span>
-                            {connection.repositoryOwner}/{connection.repositoryName}
-                          </span>
-                          <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                        </a>
-                      </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
-                        <span>{connection.issueCount ?? totalIssues} issues synced</span>
-                        <span>•</span>
-                        <span>
-                          Last sync:{" "}
-                          {connection.lastSyncedAt
-                            ? formatDateTime(connection.lastSyncedAt)
-                            : "Never"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CardContent className="p-5 pt-3">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Issues from this repository are indexed into your knowledge base. When you chat with the AI Assistant or search, relevant GitHub issues will be retrieved and cited as authorized project evidence.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
+            ) : showConnectForm || connections.length === 0 ? (
               <div className="p-8 rounded-2xl border border-dashed border-slate-200 bg-white text-center space-y-4 shadow-xs">
                 <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-white flex items-center justify-center mx-auto shadow-xs">
                   <GithubIcon className="w-6 h-6" />
                 </div>
                 <div className="max-w-md mx-auto space-y-1.5">
                   <h3 className="text-sm font-bold text-slate-900 font-serif">
-                    Connect a GitHub Repository
+                    {connections.length > 0 ? "Connect Another Repository" : "Connect a GitHub Repository"}
                   </h3>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Synchronize issues from your GitHub repository to ground AI proposals and answers in real engineering tasks and bug reports.
+                    Synchronize issues, pull requests, and codebase files from your GitHub repository into project vector memory.
                   </p>
                 </div>
 
-                {!showConnectForm ? (
-                  <Button
-                    onClick={() => setShowConnectForm(true)}
-                    className="bg-codex-accent hover:bg-codex-hover text-white text-xs gap-1.5 shadow-xs rounded-lg px-4"
-                  >
-                    <GithubIcon className="w-4 h-4" />
-                    <span>Connect Repository</span>
-                  </Button>
-                ) : (
-                  <form
-                    onSubmit={handleConnectGithub}
-                    className="max-w-md mx-auto p-5 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-3 animate-in fade-in"
-                  >
-                    <div className="space-y-1">
+                <form
+                  onSubmit={handleConnectGithub}
+                  className="max-w-md mx-auto p-5 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-3 animate-in fade-in"
+                >
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Repository Owner / Org *
+                    </label>
+                    <Input
+                      required
+                      value={owner}
+                      onChange={(e) => setOwner(e.target.value)}
+                      placeholder="e.g., facebook or your-username"
+                      className="h-8 text-xs bg-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Repository Name *
+                    </label>
+                    <Input
+                      required
+                      value={repo}
+                      onChange={(e) => setRepo(e.target.value)}
+                      placeholder="e.g., react or ai-workspace"
+                      className="h-8 text-xs bg-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
                       <label className="text-xs font-semibold text-slate-700">
-                        Repository Owner / Org *
+                        Personal Access Token (Optional)
                       </label>
-                      <Input
-                        required
-                        value={owner}
-                        onChange={(e) => setOwner(e.target.value)}
-                        placeholder="e.g., facebook or your-username"
-                        className="h-8 text-xs bg-white"
-                      />
+                      <span className="text-[10px] text-slate-400">For private repos</span>
                     </div>
+                    <Input
+                      type="password"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      placeholder="ghp_... (leave empty for public repos)"
+                      className="h-8 text-xs bg-white font-mono"
+                    />
+                  </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-slate-700">
-                        Repository Name *
-                      </label>
-                      <Input
-                        required
-                        value={repo}
-                        onChange={(e) => setRepo(e.target.value)}
-                        placeholder="e.g., react or ai-workspace"
-                        className="h-8 text-xs bg-white"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-semibold text-slate-700">
-                          Personal Access Token (Optional)
-                        </label>
-                        <span className="text-[10px] text-slate-400">For private repos</span>
-                      </div>
-                      <Input
-                        type="password"
-                        value={token}
-                        onChange={(e) => setToken(e.target.value)}
-                        placeholder="ghp_... (leave empty for public repos)"
-                        className="h-8 text-xs bg-white font-mono"
-                      />
-                    </div>
-
-                    <div className="pt-2 flex justify-end gap-2">
+                  <div className="pt-2 flex justify-end gap-2">
+                    {connections.length > 0 && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -1611,212 +1710,588 @@ export default function IntegrationsPage() {
                       >
                         Cancel
                       </Button>
-                      <Button
-                        type="submit"
-                        size="sm"
-                        disabled={connecting}
-                        className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
-                      >
-                        {connecting ? "Connecting..." : "Confirm & Sync"}
-                      </Button>
-                    </div>
-                  </form>
-                )}
+                    )}
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={connecting}
+                      className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
+                    >
+                      {connecting ? "Connecting..." : "Confirm & Sync"}
+                    </Button>
+                  </div>
+                </form>
               </div>
+            ) : isGithubConnected && (
+              <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl">
+                <CardHeader className="p-5 pb-3 border-b border-slate-100">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`https://github.com/${activeConnection.repositoryOwner}/${activeConnection.repositoryName}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1.5 font-serif"
+                        >
+                          <span>
+                            {activeConnection.repositoryOwner}/{activeConnection.repositoryName}
+                          </span>
+                          <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                        </a>
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono flex-wrap">
+                        <span>{activeConnection.issueCount ?? totalIssues} issues</span>
+                        <span>•</span>
+                        <span>{activeConnection.pullRequestCount ?? totalPrs} PRs</span>
+                        <span>•</span>
+                        <span>{activeConnection.fileCount ?? totalFiles} code files</span>
+                        <span>•</span>
+                        <span>
+                          Last sync:{" "}
+                          {activeConnection.lastSyncedAt
+                            ? formatDateTime(activeConnection.lastSyncedAt)
+                            : "Never"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="p-5 pt-3">
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Repository issues, pull requests, and codebase files are indexed into your knowledge base. When you chat with the AI Assistant or search, relevant GitHub records will be retrieved and cited as authorized project evidence.
+                  </p>
+                </CardContent>
+              </Card>
             )}
 
-            {/* Synced Issues Section */}
+            {/* Sub-Tabs: Issues | Pull Requests | Codebase Files */}
             {isGithubConnected && (
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-codex-accent" />
-                    <h2 className="text-sm font-bold text-slate-900 font-serif">
-                      Synchronized Issues ({totalIssues})
-                    </h2>
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setGithubSubTab("issues")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        githubSubTab === "issues"
+                          ? "bg-white text-slate-900 shadow-xs font-semibold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Issues ({totalIssues})</span>
+                    </button>
+
+                    <button
+                      onClick={() => setGithubSubTab("pulls")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        githubSubTab === "pulls"
+                          ? "bg-white text-slate-900 shadow-xs font-semibold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <GitPullRequest className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Pull Requests ({totalPrs})</span>
+                    </button>
+
+                    <button
+                      onClick={() => setGithubSubTab("code")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        githubSubTab === "code"
+                          ? "bg-white text-slate-900 shadow-xs font-semibold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Code2 className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Codebase ({totalFiles})</span>
+                    </button>
                   </div>
 
-                  {/* Filter Toolbar */}
+                  {/* Filter Toolbar for Active Tab */}
                   <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
-                      <input
-                        value={issueSearchQuery}
-                        onChange={(e) => setIssueSearchQuery(e.target.value)}
-                        placeholder="Search issues..."
-                        className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
-                      />
-                    </div>
+                    {githubSubTab === "issues" && (
+                      <>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                          <input
+                            value={issueSearchQuery}
+                            onChange={(e) => setIssueSearchQuery(e.target.value)}
+                            placeholder="Search issues..."
+                            className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
+                          />
+                        </div>
 
-                    <select
-                      value={selectedState}
-                      onChange={(e) => setSelectedState(e.target.value)}
-                      className="h-7 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs cursor-pointer"
-                    >
-                      <option value="all">All States</option>
-                      <option value="open">Open</option>
-                      <option value="closed">Closed</option>
-                    </select>
+                        <select
+                          value={selectedState}
+                          onChange={(e) => setSelectedState(e.target.value)}
+                          className="h-7 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs cursor-pointer"
+                        >
+                          <option value="all">All States</option>
+                          <option value="open">Open</option>
+                          <option value="closed">Closed</option>
+                        </select>
+                      </>
+                    )}
+
+                    {githubSubTab === "pulls" && (
+                      <>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                          <input
+                            value={prSearchQuery}
+                            onChange={(e) => setPrSearchQuery(e.target.value)}
+                            placeholder="Search PRs..."
+                            className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
+                          />
+                        </div>
+
+                        <select
+                          value={prState}
+                          onChange={(e) => setPrState(e.target.value)}
+                          className="h-7 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs cursor-pointer"
+                        >
+                          <option value="all">All States</option>
+                          <option value="open">Open</option>
+                          <option value="closed">Closed</option>
+                        </select>
+                      </>
+                    )}
+
+                    {githubSubTab === "code" && (
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+                        <input
+                          value={fileSearchQuery}
+                          onChange={(e) => setFileSearchQuery(e.target.value)}
+                          placeholder="Search files..."
+                          className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {loadingIssues ? (
-                  <div className="space-y-3">
-                    <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                    <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                  </div>
-                ) : issues.length === 0 ? (
-                  <div className="text-center py-12 p-6 rounded-2xl border border-dashed border-slate-200 bg-white space-y-2">
-                    <p className="text-xs text-slate-500">
-                      No issues found matching your search or state filter.
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setIssueSearchQuery("");
-                        setSelectedState("all");
-                      }}
-                      className="text-xs"
-                    >
-                      Clear Filters
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {issues.map((issue) => {
-                      const isExpanded = expandedIssues[issue.id];
-                      const isOpen = issue.state === "open";
-                      return (
-                        <Card
-                          key={issue.id}
-                          className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md rounded-2xl"
+                {/* TAB 1: ISSUES */}
+                {githubSubTab === "issues" && (
+                  <div>
+                    {loadingIssues ? (
+                      <div className="space-y-3">
+                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                      </div>
+                    ) : issues.length === 0 ? (
+                      <div className="text-center py-12 p-6 rounded-2xl border border-dashed border-slate-200 bg-white space-y-2">
+                        <p className="text-xs text-slate-500">
+                          No issues found matching your search or state filter.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setIssueSearchQuery("");
+                            setSelectedState("all");
+                          }}
+                          className="text-xs"
                         >
-                          <div className="p-4">
-                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                              <div className="flex items-start gap-2.5">
-                                <span className="pt-0.5">
-                                  {isOpen ? (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
-                                      OPEN
+                          Clear Filters
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {issues.map((issue) => {
+                          const isExpanded = expandedIssues[issue.id];
+                          const isOpen = issue.state === "open";
+                          return (
+                            <Card
+                              key={issue.id}
+                              className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md rounded-2xl"
+                            >
+                              <div className="p-4">
+                                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                  <div className="flex items-start gap-2.5">
+                                    <span className="pt-0.5">
+                                      {isOpen ? (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
+                                          OPEN
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                                          CLOSED
+                                        </span>
+                                      )}
                                     </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                                      CLOSED
-                                    </span>
-                                  )}
-                                </span>
 
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-mono text-xs font-bold text-slate-400">
-                                      #{issue.issueNumber}
-                                    </span>
-                                    <a
-                                      href={issue.htmlUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-xs font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1 font-serif"
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-mono text-xs font-bold text-slate-400">
+                                          #{issue.issueNumber}
+                                        </span>
+                                        <a
+                                          href={issue.htmlUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-xs font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1 font-serif"
+                                        >
+                                          <span>{issue.title}</span>
+                                          <ExternalLink className="w-3 h-3 text-slate-400" />
+                                        </a>
+                                      </div>
+
+                                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
+                                        {issue.authorLogin && (
+                                          <span className="flex items-center gap-1">
+                                            <User className="w-3 h-3 text-slate-400" />
+                                            <span>{issue.authorLogin}</span>
+                                          </span>
+                                        )}
+                                        <span className="flex items-center gap-1">
+                                          <Clock className="w-3 h-3 text-slate-400" />
+                                          <span>Updated {formatDate(issue.githubUpdatedAt)}</span>
+                                        </span>
+                                      </div>
+
+                                      {issue.labels && issue.labels.length > 0 && (
+                                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                          {issue.labels.map((label: string, idx: number) => (
+                                            <span
+                                              key={idx}
+                                              className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600"
+                                            >
+                                              {label}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 flex-wrap">
+                                    <Link
+                                      href={`/tasks?create=true&title=${encodeURIComponent(
+                                        `[GH-#${issue.issueNumber}] ${issue.title}`
+                                      )}`}
                                     >
-                                      <span>{issue.title}</span>
-                                      <ExternalLink className="w-3 h-3 text-slate-400" />
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
+                                        title="Create workspace task from this GitHub issue"
+                                      >
+                                        <CheckSquare className="w-3 h-3 text-[#2D8A60]" />
+                                        <span>Create Task</span>
+                                      </Button>
+                                    </Link>
+                                    <Link
+                                      href={`/assistant?prompt=${encodeURIComponent(
+                                        `Analyze GitHub issue #${issue.issueNumber}: "${issue.title}". Body: "${
+                                          issue.body || "No description"
+                                        }". How should we implement and test this?`
+                                      )}&mode=DEVELOPER`}
+                                    >
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
+                                        title="Ask Copilot about this issue"
+                                      >
+                                        <Bot className="w-3 h-3 text-codex-accent" />
+                                        <span className="hidden md:inline">Ask Copilot</span>
+                                      </Button>
+                                    </Link>
+                                    {issue.body && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          setExpandedIssues((prev) => ({
+                                            ...prev,
+                                            [issue.id]: !prev[issue.id],
+                                          }));
+                                        }}
+                                        className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 shrink-0 gap-1 px-2.5 shadow-2xs"
+                                      >
+                                        <span>{isExpanded ? "Hide Body" : "View Body"}</span>
+                                        {isExpanded ? (
+                                          <ChevronUp className="w-3 h-3" />
+                                        ) : (
+                                          <ChevronDown className="w-3 h-3" />
+                                        )}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {isExpanded && issue.body && (
+                                  <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed animate-in fade-in">
+                                    {issue.body}
+                                  </div>
+                                )}
+                              </div>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 2: PULL REQUESTS */}
+                {githubSubTab === "pulls" && (
+                  <div>
+                    {loadingPrs ? (
+                      <div className="space-y-3">
+                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                      </div>
+                    ) : pullRequests.length === 0 ? (
+                      <div className="text-center py-12 p-6 rounded-2xl border border-dashed border-slate-200 bg-white space-y-2">
+                        <p className="text-xs text-slate-500">
+                          No pull requests found matching your filter.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setPrSearchQuery("");
+                            setPrState("all");
+                          }}
+                          className="text-xs"
+                        >
+                          Clear Filters
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {pullRequests.map((pr) => {
+                          const isMerged = pr.isMerged;
+                          const isOpen = pr.state === "open";
+                          return (
+                            <Card
+                              key={pr.id}
+                              className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md rounded-2xl"
+                            >
+                              <div className="p-4">
+                                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                                  <div className="flex items-start gap-2.5">
+                                    <span className="pt-0.5">
+                                      {isMerged ? (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                                          MERGED
+                                        </span>
+                                      ) : isOpen ? (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
+                                          OPEN
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                          CLOSED
+                                        </span>
+                                      )}
+                                    </span>
+
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-mono text-xs font-bold text-slate-400">
+                                          #{pr.prNumber}
+                                        </span>
+                                        <a
+                                          href={pr.htmlUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-xs font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1 font-serif"
+                                        >
+                                          <span>{pr.title}</span>
+                                          <ExternalLink className="w-3 h-3 text-slate-400" />
+                                        </a>
+                                      </div>
+
+                                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
+                                        {pr.headBranch && pr.baseBranch && (
+                                          <span className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                                            <GitBranch className="w-3 h-3 text-slate-500" />
+                                            <span>{pr.headBranch}</span>
+                                            <span>→</span>
+                                            <span>{pr.baseBranch}</span>
+                                          </span>
+                                        )}
+                                        {pr.authorLogin && (
+                                          <span className="flex items-center gap-1">
+                                            <User className="w-3 h-3 text-slate-400" />
+                                            <span>{pr.authorLogin}</span>
+                                          </span>
+                                        )}
+                                        <span className="flex items-center gap-1">
+                                          <Clock className="w-3 h-3 text-slate-400" />
+                                          <span>Updated {formatDate(pr.githubUpdatedAt)}</span>
+                                        </span>
+                                      </div>
+
+                                      {pr.labels && pr.labels.length > 0 && (
+                                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                          {pr.labels.map((label: string, idx: number) => (
+                                            <span
+                                              key={idx}
+                                              className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600"
+                                            >
+                                              {label}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 flex-wrap">
+                                    <Link
+                                      href={`/assistant?prompt=${encodeURIComponent(
+                                        `Review pull request #${pr.prNumber}: "${pr.title}". Branches: ${pr.headBranch} -> ${pr.baseBranch}. Description: "${
+                                          pr.body || "No description provided"
+                                        }". What are the key architectural changes and testing checklist?`
+                                      )}&mode=DEVELOPER`}
+                                    >
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
+                                        title="Ask Copilot to review this PR"
+                                      >
+                                        <Bot className="w-3 h-3 text-codex-accent" />
+                                        <span>Ask Copilot</span>
+                                      </Button>
+                                    </Link>
+                                    <a href={pr.htmlUrl} target="_blank" rel="noreferrer">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
+                                      >
+                                        <ExternalLink className="w-3 h-3" />
+                                        <span>View on GitHub</span>
+                                      </Button>
                                     </a>
                                   </div>
+                                </div>
 
-                                  <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
-                                    {issue.authorLogin && (
-                                      <span className="flex items-center gap-1">
-                                        <User className="w-3 h-3 text-slate-400" />
-                                        <span>{issue.authorLogin}</span>
-                                      </span>
-                                    )}
-                                    <span className="flex items-center gap-1">
-                                      <Clock className="w-3 h-3 text-slate-400" />
-                                      <span>Updated {formatDate(issue.githubUpdatedAt)}</span>
+                                {pr.body && (
+                                  <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed">
+                                    {pr.body}
+                                  </div>
+                                )}
+                              </div>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 3: CODEBASE INDEX */}
+                {githubSubTab === "code" && (
+                  <div>
+                    {loadingFiles ? (
+                      <div className="space-y-3">
+                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
+                      </div>
+                    ) : repoFiles.length === 0 ? (
+                      <div className="text-center py-12 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+                          <Code2 className="w-5 h-5" />
+                        </div>
+                        <div className="max-w-md mx-auto space-y-1">
+                          <h4 className="text-sm font-bold text-slate-900 font-serif">
+                            No Codebase Files Indexed Yet
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            Index repository source files into vector memory so the AI Copilot can answer technical questions and reference implementation code.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          disabled={syncingCode}
+                          onClick={handleSyncCodebase}
+                          className="bg-codex-accent hover:bg-codex-hover text-white text-xs gap-1.5 shadow-xs"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${syncingCode ? "animate-spin" : ""}`} />
+                          <span>{syncingCode ? "Indexing Codebase..." : "Index Codebase Now"}</span>
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-slate-500 px-1 pb-1">
+                          <span>Showing {repoFiles.length} indexed files</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={syncingCode}
+                            onClick={handleSyncCodebase}
+                            className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 p-1"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${syncingCode ? "animate-spin" : ""}`} />
+                            <span>Re-index</span>
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {repoFiles.map((file) => (
+                            <div
+                              key={file.id}
+                              className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl transition-all shadow-2xs flex items-center justify-between gap-3"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-slate-50 text-slate-600 flex items-center justify-center shrink-0 border border-slate-200">
+                                  <FileCode className="w-4 h-4 text-blue-600" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-mono font-medium text-slate-900 truncate">
+                                      {file.path}
+                                    </span>
+                                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
+                                      {file.extension}
                                     </span>
                                   </div>
-
-                                  {issue.labels && issue.labels.length > 0 && (
-                                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                                      {issue.labels.map((label: string, idx: number) => (
-                                        <span
-                                          key={idx}
-                                          className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600"
-                                        >
-                                          {label}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    {(file.size / 1024).toFixed(1)} KB • Indexed in pgvector
+                                  </span>
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 flex-wrap">
-                                <Link
-                                  href={`/tasks?create=true&title=${encodeURIComponent(
-                                    `[GH-#${issue.issueNumber}] ${issue.title}`
-                                  )}`}
-                                >
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
-                                    title="Create workspace task from this GitHub issue"
-                                  >
-                                    <CheckSquare className="w-3 h-3 text-[#2D8A60]" />
-                                    <span>Create Task</span>
-                                  </Button>
-                                </Link>
+                              <div className="flex items-center gap-1.5 shrink-0">
                                 <Link
                                   href={`/assistant?prompt=${encodeURIComponent(
-                                    `Analyze GitHub issue #${issue.issueNumber}: "${issue.title}". Body: "${
-                                      issue.body || "No description"
-                                    }". How should we implement and test this?`
+                                    `Explain the file "${file.path}" from repository ${activeConnection.repositoryOwner}/${activeConnection.repositoryName}. What does it do and how is it used in the architecture?`
                                   )}&mode=DEVELOPER`}
                                 >
                                   <Button
                                     size="sm"
                                     variant="ghost"
                                     className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
-                                    title="Ask Copilot about this issue"
+                                    title="Ask Copilot about this file"
                                   >
                                     <Bot className="w-3 h-3 text-codex-accent" />
-                                    <span className="hidden md:inline">Ask Copilot</span>
+                                    <span className="hidden sm:inline">Ask Copilot</span>
                                   </Button>
                                 </Link>
-                                {issue.body && (
+
+                                <a href={file.htmlUrl} target="_blank" rel="noreferrer">
                                   <Button
-                                    variant="ghost"
                                     size="sm"
-                                    onClick={() => {
-                                      setExpandedIssues((prev) => ({
-                                        ...prev,
-                                        [issue.id]: !prev[issue.id],
-                                      }));
-                                    }}
-                                    className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 shrink-0 gap-1 px-2.5 shadow-2xs"
+                                    variant="outline"
+                                    className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2 shadow-2xs"
+                                    title="Open file on GitHub"
                                   >
-                                    <span>{isExpanded ? "Hide Body" : "View Body"}</span>
-                                    {isExpanded ? (
-                                      <ChevronUp className="w-3 h-3" />
-                                    ) : (
-                                      <ChevronDown className="w-3 h-3" />
-                                    )}
+                                    <ExternalLink className="w-3 h-3" />
                                   </Button>
-                                )}
+                                </a>
                               </div>
                             </div>
-
-                            {/* Collapsible Body preview */}
-                            {isExpanded && issue.body && (
-                              <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed animate-in fade-in">
-                                {issue.body}
-                              </div>
-                            )}
-                          </div>
-                        </Card>
-                      );
-                    })}
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

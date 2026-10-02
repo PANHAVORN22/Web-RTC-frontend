@@ -45,6 +45,7 @@ import {
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 
 const getSourceLink = (sourceType: string, title: string, sourceId?: string) => {
   const cleanTitle = title.replace(/\s*\([^)]*\)$/, "").trim();
@@ -1293,15 +1294,15 @@ export default function AssistantPage() {
       </div>
 
       {/* Confirmation Modal for Conversation Deletion */}
-      <ConfirmModal
+      <DeleteConfirmModal
         isOpen={!!deleteTargetId}
         onClose={() => !isDeleting && setDeleteTargetId(null)}
         onConfirm={confirmDeleteConversation}
-        title="Delete Conversation"
-        description="Are you sure you want to delete this conversation? This will permanently delete its messages and citations."
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="danger"
+        title="Delete conversation"
+        itemName={conversations.find((c) => c.id === deleteTargetId)?.title || "Conversation"}
+        itemType="conversation"
+        warningText="This action cannot be undone. All messages and citations in this conversation will be permanently removed."
+        confirmText="Delete conversation"
         loading={isDeleting}
       />
 

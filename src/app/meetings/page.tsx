@@ -1,36 +1,25 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { ProposalReviewDialog } from "@/components/ai/proposal-review-dialog";
-import { FilterDropdown, FilterOption } from "@/components/ui/filter-dropdown";
 import { api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import {
   Plus,
-  Calendar,
   Clock,
   Search,
-  X,
-  Sparkles,
-  BookOpen,
-  CheckSquare,
-  GitPullRequest,
-  Bot,
-  FileCheck2,
-  LayoutGrid,
-  List,
-  Trash2,
-  AlertCircle,
-  FileText,
+  ArrowLeft,
+  Pencil,
+  Check,
   ChevronDown,
-  ChevronUp,
+  Sparkles,
+  Trash2,
+  X,
 } from "lucide-react";
-import { formatDateTime, formatDate } from "@/lib/utils";
 
 interface ProjectInfo {
   id: string;
@@ -38,21 +27,12 @@ interface ProjectInfo {
   key: string;
 }
 
-const MEETING_PROJECT_COLORS = [
-  "#C0392B",
-  "#8B5CF6",
-  "#3B82F6",
-  "#059669",
-  "#D97706",
-  "#EC4899",
-  "#6366F1",
-];
-
-const MEETING_STATUS_OPTIONS: FilterOption[] = [
-  { value: "UPCOMING", label: "Upcoming", color: "#3B82F6" },
-  { value: "COMPLETED", label: "Completed", color: "#10B981" },
-  { value: "TRANSCRIPT", label: "With Transcript", color: "#8B5CF6" },
-];
+interface MemberInfo {
+  id: string;
+  name: string;
+  displayName: string;
+  email?: string;
+}
 
 function getProjectBadgeStyle(projectName?: string | null) {
   if (!projectName) {
@@ -71,111 +51,280 @@ function getProjectBadgeStyle(projectName?: string | null) {
   return "bg-purple-50 text-purple-700 border-purple-200";
 }
 
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHours = Math.floor(diffMin / 60);
-  const diffDays = Math.floor(diffHours / 24);
+function formatDateBadge(dateStr: string | Date | undefined) {
+  if (!dateStr) return { day: "—", month: "" };
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return { day: "—", month: "" };
+  const day = d.getDate();
+  const monthNames = [
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEPT",
+    "OCT",
+    "NOV",
+    "DEC",
+  ];
+  const month = monthNames[d.getMonth()];
+  return { day: String(day), month };
+}
 
-  if (diffHours < 1) return diffMin <= 1 ? "Just now" : `${diffMin}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+function formatMeetingTime(dateStr: string | Date | undefined): string {
+  if (!dateStr) return "10:00 AM";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "10:00 AM";
+  let hours = d.getHours();
+  const minutes = d.getMinutes();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const minutesStr = minutes < 10 ? "0" + minutes : minutes;
+  return `${hours}:${minutesStr} ${ampm}`;
+}
+
+function formatDetailDate(dateStr: string | Date | undefined): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const m = monthNames[d.getMonth()];
+  const day = d.getDate() < 10 ? `0${d.getDate()}` : `${d.getDate()}`;
+  return `${m} ${day}, ${d.getFullYear()}`;
+}
+
+function parseTimeToHoursMinutes(timeStr: string): { hours: number; minutes: number } {
+  const trimmed = (timeStr || "").trim().toUpperCase();
+  const isPM = trimmed.includes("PM");
+  const isAM = trimmed.includes("AM");
+  const clean = trimmed.replace(/[^\d:]/g, "");
+  const parts = clean.split(":");
+  let hours = parseInt(parts[0] || "10", 10);
+  let minutes = parseInt(parts[1] || "0", 10);
+  if (isNaN(hours)) hours = 10;
+  if (isNaN(minutes)) minutes = 0;
+
+  if (isPM && hours < 12) hours += 12;
+  if (isAM && hours === 12) hours = 0;
+
+  return { hours, minutes };
+}
+
+function getAttendeeAvatar(user: {
+  userId?: string;
+  id?: string;
+  displayName?: string;
+  name?: string;
+  email?: string;
+}) {
+  const name = user.displayName || user.name || user.email || "Member";
+  const trimmed = name.trim();
+
+  let initials = "U";
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    initials = (parts[0][0] + parts[1][0]).toUpperCase();
+  } else if (trimmed.length >= 2) {
+    initials = trimmed.slice(0, 2).toUpperCase();
+  } else if (trimmed.length === 1) {
+    initials = trimmed.toUpperCase();
+  }
+
+  const colors = [
+    "bg-[#2563eb]",
+    "bg-[#f59e0b]",
+    "bg-[#0f172a]",
+    "bg-[#dc2626]",
+    "bg-[#7c3aed]",
+    "bg-[#059669]",
+    "bg-[#ea580c]",
+    "bg-[#0891b2]",
+  ];
+  let hash = 0;
+  for (let i = 0; i < trimmed.length; i++) {
+    hash = trimmed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const color = colors[Math.abs(hash) % colors.length];
+
+  return { initials, color, name: trimmed };
 }
 
 export default function MeetingsPage() {
   const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
 
+  // Navigation view: 'list' | 'detail' | 'new' | 'edit'
+  const [view, setView] = useState<"list" | "detail" | "new" | "edit">("list");
+  const [activeMeeting, setActiveMeeting] = useState<any | null>(null);
+
+  // Meetings data
   const [meetings, setMeetings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters & Search
+  // Filter & Search states
   const [selectedProjectId, setSelectedProjectId] = useState<string>("ALL");
-  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
-  const [targetMeetingId, setTargetMeetingId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Create Modal state
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createProjectId, setCreateProjectId] = useState("");
-  const [createTitle, setCreateTitle] = useState("");
-  const [createDate, setCreateDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [createStartTime, setCreateStartTime] = useState("10:00");
-  const [createEndTime, setCreateEndTime] = useState("11:00");
-  const [createAgenda, setCreateAgenda] = useState("");
-  const [createNotes, setCreateNotes] = useState("");
-  const [createTranscriptText, setCreateTranscriptText] = useState("");
+  // Real project members map: projectId -> MemberInfo[]
+  const [projectMembersMap, setProjectMembersMap] = useState<Record<string, MemberInfo[]>>({});
+
+  // Form states (used for both New and Edit views)
+  const [formTitle, setFormTitle] = useState("");
+  const [formProjectId, setFormProjectId] = useState("");
+  const [formDate, setFormDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [formTime, setFormTime] = useState("10:00 AM");
+  const [selectedAttendeeUserIds, setSelectedAttendeeUserIds] = useState<string[]>([]);
+  const [formNotes, setFormNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [createErrorMsg, setCreateErrorMsg] = useState<string | null>(null);
-
-  // Detail / Edit Modal state
-  const [activeMeeting, setActiveMeeting] = useState<any | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editAgenda, setEditAgenda] = useState("");
-  const [editNotes, setEditNotes] = useState("");
-  const [editTranscript, setEditTranscript] = useState("");
-  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // AI Proposal state
   const [activeProposal, setActiveProposal] = useState<any>(null);
   const [generatingProposalId, setGeneratingProposalId] = useState<string | null>(null);
 
+  // Delete confirmation state
+  const [deleteConfirmMeeting, setDeleteConfirmMeeting] = useState<any | null>(null);
+  const [deletingMeeting, setDeletingMeeting] = useState(false);
+
+  // Close project dropdown when clicked outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        projectDropdownRef.current &&
+        !projectDropdownRef.current.contains(event.target as Node)
+      ) {
+        setProjectDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Fetch project members for a specific project
+  const fetchProjectMembers = useCallback(async (projId: string) => {
+    if (!projId || projId === "ALL") return [];
+    try {
+      const res = await api.projects.getMembers(projId);
+      const list = Array.isArray(res) ? res : (res as any)?.data || [];
+      const members: MemberInfo[] = list.map((item: any) => ({
+        id: item.user?.id || item.userId || item.id,
+        name: item.user?.displayName || item.user?.email || "Member",
+        displayName: item.user?.displayName || item.user?.email || "Member",
+        email: item.user?.email,
+      }));
+      setProjectMembersMap((prev) => ({ ...prev, [projId]: members }));
+      return members;
+    } catch (err) {
+      console.error("Failed to load members for project " + projId, err);
+      return [];
+    }
+  }, []);
+
+  // Load all real meetings and pre-cache members across projects
   const loadData = useCallback(async () => {
-    if (!currentProject) return;
     setLoading(true);
     try {
-      const data = await api.meetings.list(currentProject.id);
-      setMeetings(data || []);
+      let projs = projects;
+      if (!projs || projs.length === 0) {
+        projs = (await api.projects.list()) || [];
+      }
+
+      if (projs.length === 0 && currentProject) {
+        projs = [currentProject];
+      }
+
+      // Fetch meetings and members concurrently
+      const results = await Promise.all(
+        projs.map(async (p: any) => {
+          try {
+            const res = await api.meetings.list(p.id);
+            const list = Array.isArray(res) ? res : (res as any)?.data || [];
+            return list.map((m: any) => ({
+              ...m,
+              projectName: m.projectName || p.name,
+              projectId: m.projectId || p.id,
+              project: m.project || { id: p.id, name: p.name, key: p.key },
+            }));
+          } catch {
+            return [];
+          }
+        })
+      );
+
+      // Pre-load members for each project
+      const membersMap: Record<string, MemberInfo[]> = {};
+      await Promise.all(
+        projs.map(async (p: any) => {
+          try {
+            const mems = await api.projects.getMembers(p.id);
+            const list = Array.isArray(mems) ? mems : (mems as any)?.data || [];
+            membersMap[p.id] = list.map((item: any) => ({
+              id: item.user?.id || item.userId || item.id,
+              name: item.user?.displayName || item.user?.email || "Member",
+              displayName: item.user?.displayName || item.user?.email || "Member",
+              email: item.user?.email,
+            }));
+          } catch {
+            membersMap[p.id] = [];
+          }
+        })
+      );
+      setProjectMembersMap(membersMap);
+
+      const allMeetings = results.flat();
+      setMeetings(allMeetings);
     } catch (err: any) {
       console.error(err);
       showToast(err.message || "Failed to load meetings", "error");
     } finally {
       setLoading(false);
     }
-  }, [currentProject, showToast]);
+  }, [projects, currentProject, showToast]);
 
+  // Initial URL query handling
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("create") === "true") {
-        setShowCreateModal(true);
-      }
-      const q = params.get("search");
-      if (q) {
-        setSearchQuery(q);
+        openNewMeetingView();
       }
       const targetId = params.get("id") || params.get("meetingId");
-      if (targetId) {
-        setTargetMeetingId(targetId);
+      if (targetId && meetings.length > 0) {
+        const found = meetings.find(
+          (m) => m.id === targetId || m.id?.toLowerCase() === targetId.toLowerCase()
+        );
+        if (found) {
+          openDetailView(found);
+        }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetings]);
+
+  useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Auto-open inspected meeting modal if id/meetingId is in URL
-  useEffect(() => {
-    if (!targetMeetingId || meetings.length === 0) return;
-    const found = meetings.find(
-      (m: any) =>
-        m.id === targetMeetingId ||
-        m.id?.toLowerCase() === targetMeetingId.toLowerCase()
-    );
-    if (found) {
-      openDetailModal(found);
-      setTargetMeetingId(null);
-    }
-  }, [meetings, targetMeetingId]);
-
-  // Project options for dropdown
-  const activeProjectsList = useMemo(() => {
+  // Active projects list for dropdown
+  const allProjects = useMemo(() => {
     const map = new Map<string, ProjectInfo>();
     for (const p of projects) {
       map.set(p.id, { id: p.id, name: p.name, key: p.key });
@@ -183,168 +332,274 @@ export default function MeetingsPage() {
     for (const m of meetings) {
       if (m.project) {
         map.set(m.project.id, m.project);
+      } else if (m.projectId && m.projectName) {
+        map.set(m.projectId, { id: m.projectId, name: m.projectName, key: "" });
       }
     }
     return Array.from(map.values());
   }, [projects, meetings]);
 
-  const meetingProjectOptions: FilterOption[] = useMemo(() => {
-    return activeProjectsList.map((p, idx) => ({
-      value: p.id,
-      label: p.name,
-      color: MEETING_PROJECT_COLORS[idx % MEETING_PROJECT_COLORS.length],
-    }));
-  }, [activeProjectsList]);
+  const selectedProjectObj = useMemo(() => {
+    if (selectedProjectId === "ALL") return null;
+    return allProjects.find((p) => p.id === selectedProjectId) || null;
+  }, [allProjects, selectedProjectId]);
 
-  // Status Counts for summary pills
-  const now = useMemo(() => new Date(), []);
-  const statusCounts = useMemo(() => {
-    let upcoming = 0;
-    let completed = 0;
-    let transcript = 0;
-    for (const m of meetings) {
-      const isUp = new Date(m.startsAt || m.createdAt) >= now;
-      if (isUp) upcoming++;
-      else completed++;
-      if (m.transcriptText) transcript++;
-    }
-    return { UPCOMING: upcoming, COMPLETED: completed, TRANSCRIPT: transcript };
-  }, [meetings, now]);
-
-  // Filtered meetings list
+  // Filter meetings
   const filteredMeetings = useMemo(() => {
     return meetings.filter((m) => {
-      // Project filter
       if (selectedProjectId !== "ALL" && m.projectId !== selectedProjectId) {
         return false;
       }
-      // Status filter
-      if (selectedStatus === "UPCOMING" && new Date(m.startsAt || m.createdAt) < now) return false;
-      if (selectedStatus === "COMPLETED" && new Date(m.startsAt || m.createdAt) >= now) return false;
-      if (selectedStatus === "TRANSCRIPT" && !m.transcriptText) return false;
-
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchTitle = (m.title || "").toLowerCase().includes(q);
-        const matchAgenda = (m.agenda || "").toLowerCase().includes(q);
         const matchNotes = (m.notes || "").toLowerCase().includes(q);
-        const matchTranscript = (m.transcriptText || "").toLowerCase().includes(q);
-        const matchId = (m.id || "").toLowerCase() === q;
-        if (!matchTitle && !matchAgenda && !matchNotes && !matchTranscript && !matchId) {
+        const matchProject = (m.projectName || m.project?.name || "").toLowerCase().includes(q);
+        const matchAttendees = (m.attendees || []).some(
+          (a: any) =>
+            (a.displayName || "").toLowerCase().includes(q) ||
+            (a.email || "").toLowerCase().includes(q)
+        );
+        if (!matchTitle && !matchNotes && !matchProject && !matchAttendees) {
           return false;
         }
       }
       return true;
     });
-  }, [meetings, selectedProjectId, selectedStatus, searchQuery, now]);
+  }, [meetings, selectedProjectId, searchQuery]);
 
-  const filteredProjectsCount = useMemo(() => {
-    const set = new Set<string>();
+  // Split into Upcoming and Past based on current time
+  const { upcomingMeetings, pastMeetings } = useMemo(() => {
+    const now = new Date();
+    const upcoming: any[] = [];
+    const past: any[] = [];
+
     for (const m of filteredMeetings) {
+      const start = new Date(m.startsAt || m.createdAt);
+      if (start >= now) {
+        upcoming.push(m);
+      } else {
+        past.push(m);
+      }
+    }
+
+    upcoming.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+    past.sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+
+    return { upcomingMeetings: upcoming, pastMeetings: past };
+  }, [filteredMeetings]);
+
+  const activeProjectsCount = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of meetings) {
       if (m.projectId) set.add(m.projectId);
     }
-    return set.size || (activeProjectsList.length > 0 ? activeProjectsList.length : 1);
-  }, [filteredMeetings, activeProjectsList]);
+    return set.size || allProjects.length || 1;
+  }, [meetings, allProjects]);
 
-  // Open Create Modal
-  const openCreateModal = () => {
-    setCreateProjectId(
-      selectedProjectId !== "ALL"
-        ? selectedProjectId
-        : currentProject?.id || activeProjectsList[0]?.id || ""
-    );
-    setCreateTitle("");
-    setCreateDate(new Date().toISOString().split("T")[0]);
-    setCreateStartTime("10:00");
-    setCreateEndTime("11:00");
-    setCreateAgenda("");
-    setCreateNotes("");
-    setCreateTranscriptText("");
-    setCreateErrorMsg(null);
-    setShowCreateModal(true);
+  // Current available members for selected form project
+  const availableMembers = useMemo(() => {
+    if (!formProjectId) return [];
+    return projectMembersMap[formProjectId] || [];
+  }, [formProjectId, projectMembersMap]);
+
+  // When formProjectId changes, ensure its members are loaded if not in map
+  useEffect(() => {
+    if (formProjectId && formProjectId !== "ALL" && !projectMembersMap[formProjectId]) {
+      fetchProjectMembers(formProjectId);
+    }
+  }, [formProjectId, projectMembersMap, fetchProjectMembers]);
+
+  // Navigation handlers
+  const openDetailView = (meeting: any) => {
+    setActiveMeeting(meeting);
+    setView("detail");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("id", meeting.id);
+      url.searchParams.delete("create");
+      window.history.pushState({}, "", url.toString());
+    }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openNewMeetingView = () => {
+    setFormTitle("");
+    const targetProjId =
+      selectedProjectId !== "ALL"
+        ? selectedProjectId
+        : currentProject?.id || allProjects[0]?.id || "";
+    setFormProjectId(targetProjId);
+    setFormDate(new Date().toISOString().split("T")[0]);
+    setFormTime("10:00 AM");
+    setSelectedAttendeeUserIds([]);
+    setFormNotes("");
+    if (targetProjId && !projectMembersMap[targetProjId]) {
+      fetchProjectMembers(targetProjId);
+    }
+    setView("new");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("create", "true");
+      url.searchParams.delete("id");
+      window.history.pushState({}, "", url.toString());
+    }
+  };
+
+  const openEditView = (meeting: any) => {
+    setActiveMeeting(meeting);
+    setFormTitle(meeting.title || "");
+    const projId = meeting.projectId || currentProject?.id || allProjects[0]?.id || "";
+    setFormProjectId(projId);
+    if (projId && !projectMembersMap[projId]) {
+      fetchProjectMembers(projId);
+    }
+    if (meeting.startsAt) {
+      const d = new Date(meeting.startsAt);
+      setFormDate(d.toISOString().split("T")[0]);
+      setFormTime(formatMeetingTime(d));
+    } else {
+      setFormDate(new Date().toISOString().split("T")[0]);
+      setFormTime("10:00 AM");
+    }
+    const attIds = (meeting.attendees || []).map((a: any) => a.userId || a.id);
+    setSelectedAttendeeUserIds(attIds);
+    setFormNotes(meeting.notes || meeting.agenda || "");
+    setView("edit");
+  };
+
+  const handleBackToList = () => {
+    setView("list");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("id");
+      url.searchParams.delete("create");
+      window.history.pushState({}, "", url.toString());
+    }
+  };
+
+  const toggleAttendee = (userId: string) => {
+    setSelectedAttendeeUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  // Create Meeting submit
+  const handleCreateMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
-    const targetProjId = createProjectId || currentProject?.id;
-    if (!targetProjId || !createTitle.trim()) {
-      setCreateErrorMsg("Please provide a title for the meeting.");
+    if (!formTitle.trim()) {
+      showToast("Please provide a meeting title", "error");
       return;
     }
-    setSubmitting(true);
-    setCreateErrorMsg(null);
-    try {
-      const startsAt = new Date(`${createDate}T${createStartTime}:00`).toISOString();
-      const endsAt = new Date(`${createDate}T${createEndTime}:00`).toISOString();
+    const targetProjId = formProjectId || currentProject?.id || allProjects[0]?.id;
+    if (!targetProjId) {
+      showToast("Please select a project", "error");
+      return;
+    }
 
-      if (new Date(endsAt) <= new Date(startsAt)) {
-        throw new Error("Meeting end time must be after start time");
-      }
+    setSubmitting(true);
+    try {
+      const { hours, minutes } = parseTimeToHoursMinutes(formTime);
+      const start = new Date(formDate);
+      start.setHours(hours, minutes, 0, 0);
+      const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration
 
       await api.meetings.create(targetProjId, {
-        title: createTitle.trim(),
-        startsAt,
-        endsAt,
-        agenda: createAgenda.trim() || undefined,
-        notes: createNotes.trim() || undefined,
-        transcriptText: createTranscriptText.trim() || undefined,
+        title: formTitle.trim(),
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+        notes: formNotes.trim() || undefined,
+        attendeeUserIds:
+          selectedAttendeeUserIds.length > 0 ? selectedAttendeeUserIds : undefined,
       });
 
-      setShowCreateModal(false);
-      showToast("Logged meeting successfully!", "success");
+      showToast("Meeting created successfully!", "success");
       await loadData();
+      handleBackToList();
     } catch (err: any) {
-      setCreateErrorMsg(err.message || "Failed to log meeting");
-      showToast(err.message || "Failed to log meeting", "error");
+      showToast(err.message || "Failed to create meeting", "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Open Detail / Edit Modal
-  const openDetailModal = (meeting: any) => {
-    setActiveMeeting(meeting);
-    setEditTitle(meeting.title || "");
-    setEditAgenda(meeting.agenda || "");
-    setEditNotes(meeting.notes || "");
-    setEditTranscript(meeting.transcriptText || "");
-  };
-
-  const handleUpdate = async (e: React.FormEvent) => {
+  // Edit Meeting submit
+  const handleSaveEditMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeMeeting || !editTitle.trim()) return;
-    setEditSubmitting(true);
+    if (!activeMeeting || !formTitle.trim()) {
+      showToast("Please provide a meeting title", "error");
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      await api.meetings.update(activeMeeting.projectId || currentProject?.id, activeMeeting.id, {
-        title: editTitle.trim(),
-        agenda: editAgenda.trim() || undefined,
-        notes: editNotes.trim() || undefined,
-        transcriptText: editTranscript.trim() || undefined,
-      });
-      showToast("Meeting updated successfully", "success");
-      setActiveMeeting(null);
+      const { hours, minutes } = parseTimeToHoursMinutes(formTime);
+      const start = new Date(formDate);
+      start.setHours(hours, minutes, 0, 0);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+      await api.meetings.update(
+        activeMeeting.projectId || formProjectId,
+        activeMeeting.id,
+        {
+          version: activeMeeting.version ?? 1,
+          title: formTitle.trim(),
+          startsAt: start.toISOString(),
+          endsAt: end.toISOString(),
+          notes: formNotes.trim() || undefined,
+          attendeeUserIds: selectedAttendeeUserIds,
+        }
+      );
+
+      showToast("Meeting updated successfully!", "success");
       await loadData();
+
+      // Refresh active meeting object in state
+      const proj = allProjects.find((p) => p.id === (activeMeeting.projectId || formProjectId));
+      const membersForProj = projectMembersMap[activeMeeting.projectId || formProjectId] || [];
+      const updatedObj = {
+        ...activeMeeting,
+        version: (activeMeeting.version ?? 1) + 1,
+        title: formTitle.trim(),
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+        notes: formNotes.trim(),
+        projectName: proj?.name || activeMeeting.projectName,
+        attendees: selectedAttendeeUserIds.map((uid) => {
+          const m = membersForProj.find((mem) => mem.id === uid);
+          return {
+            userId: uid,
+            displayName: m?.displayName || m?.name || "Member",
+          };
+        }),
+      };
+      setActiveMeeting(updatedObj);
+      setView("detail");
     } catch (err: any) {
       showToast(err.message || "Failed to update meeting", "error");
     } finally {
-      setEditSubmitting(false);
+      setSubmitting(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!activeMeeting) return;
-    if (!confirm(`Are you sure you want to delete meeting "${activeMeeting.title}"?`)) return;
-    setEditSubmitting(true);
+  // Delete Meeting
+  const handleDeleteMeeting = (meeting: any) => {
+    if (!meeting) return;
+    setDeleteConfirmMeeting(meeting);
+  };
+
+  const handleConfirmDeleteMeeting = async () => {
+    if (!deleteConfirmMeeting) return;
+    setDeletingMeeting(true);
     try {
-      await api.meetings.delete(activeMeeting.projectId || currentProject?.id, activeMeeting.id);
-      showToast("Meeting deleted", "success");
-      setActiveMeeting(null);
+      await api.meetings.delete(deleteConfirmMeeting.projectId, deleteConfirmMeeting.id);
+      showToast("Meeting deleted successfully", "success");
+      setDeleteConfirmMeeting(null);
+      handleBackToList();
       await loadData();
     } catch (err: any) {
       showToast(err.message || "Failed to delete meeting", "error");
     } finally {
-      setEditSubmitting(false);
+      setDeletingMeeting(false);
     }
   };
 
@@ -368,771 +623,944 @@ export default function MeetingsPage() {
     }
   };
 
+  // Active meeting attendees with name resolution
+  const activeMeetingAttendees = useMemo(() => {
+    if (!activeMeeting) return [];
+    const list = activeMeeting.attendees || [];
+    const projMembers = projectMembersMap[activeMeeting.projectId] || [];
+    return list.map((att: any) => {
+      const mem = projMembers.find((m) => m.id === (att.userId || att.id));
+      return {
+        userId: att.userId || att.id,
+        displayName: att.displayName || mem?.displayName || mem?.name || "Member",
+        email: att.email || mem?.email,
+      };
+    });
+  }, [activeMeeting, projectMembersMap]);
+
   return (
     <AppLayout>
-      <div className="space-y-5 max-w-7xl mx-auto pb-12">
-        {/* Top Breadcrumb & Header */}
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div>
-            <nav className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
-              <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
-                Dashboard
-              </Link>
-              <span>/</span>
-              <span className="text-slate-800 font-medium">Meetings</span>
-            </nav>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
-              Meetings
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">
-              {filteredMeetings.length} meeting{filteredMeetings.length === 1 ? "" : "s"} across{" "}
-              {filteredProjectsCount} active {filteredProjectsCount === 1 ? "project" : "projects"}.
-            </p>
-
-            {/* Status Summary Pills (Matching Requirements & Tasks page!) */}
-            <div className="flex items-center gap-2 mt-3">
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(selectedStatus === "UPCOMING" ? "ALL" : "UPCOMING")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                  selectedStatus === "UPCOMING"
-                    ? "bg-blue-50 text-blue-900 border-blue-400 ring-1 ring-blue-400 shadow-xs"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-[#3b82f6]" />
-                <span>Upcoming {statusCounts.UPCOMING}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(selectedStatus === "COMPLETED" ? "ALL" : "COMPLETED")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                  selectedStatus === "COMPLETED"
-                    ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400 shadow-xs"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-[#10b981]" />
-                <span>Completed {statusCounts.COMPLETED}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedStatus(selectedStatus === "TRANSCRIPT" ? "ALL" : "TRANSCRIPT")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer ${
-                  selectedStatus === "TRANSCRIPT"
-                    ? "bg-purple-50 text-purple-900 border-purple-400 ring-1 ring-purple-400 shadow-xs"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 shadow-2xs"
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full bg-[#8b5cf6]" />
-                <span>With Transcripts {statusCounts.TRANSCRIPT}</span>
-              </button>
-            </div>
-          </div>
-
-          <Button
-            onClick={openCreateModal}
-            className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm flex items-center gap-1.5 self-start sm:self-auto h-9"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>New Meeting</span>
-          </Button>
-        </div>
-
-        {/* Filter Toolbar & View Switcher */}
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
-          {/* Left: Dropdown Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Project Filter */}
-            <FilterDropdown
-              label="Project"
-              allLabel="All projects"
-              value={selectedProjectId}
-              onChange={setSelectedProjectId}
-              options={meetingProjectOptions}
-            />
-
-            {/* Status Filter */}
-            <FilterDropdown
-              label="Status"
-              allLabel="All meetings"
-              value={selectedStatus}
-              onChange={setSelectedStatus}
-              options={MEETING_STATUS_OPTIONS}
-            />
-          </div>
-
-          {/* Right: Search Filter & View Switcher */}
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex-1 md:w-64">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter meetings..."
-                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* List / Grid Switcher */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/80 shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode("table")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "table"
-                    ? "bg-[#0f172a] text-white shadow-xs font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <List className="w-3.5 h-3.5" />
-                <span>List</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("grid")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "grid"
-                    ? "bg-[#0f172a] text-white shadow-xs font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Grid</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Content Area */}
-        {loading ? (
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-2xs space-y-4">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />
-            ))}
-          </div>
-        ) : filteredMeetings.length === 0 ? (
-          <div className="text-center py-20 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3 shadow-2xs">
-            <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
-              <Calendar className="w-6 h-6" />
-            </div>
-            <h3 className="text-sm font-semibold text-slate-900">No matching meetings found</h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              {meetings.length === 0
-                ? "No meetings logged yet. Log your first meeting to capture agenda, minutes, and transcripts."
-                : "Try adjusting your project or status filters, or clear your search term."}
-            </p>
-            {meetings.length === 0 ? (
-              <Button
-                onClick={openCreateModal}
-                className="text-xs bg-[#2563eb] hover:bg-[#1d4ed8] text-white mt-2"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Log First Meeting
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSelectedProjectId("ALL");
-                  setSelectedStatus("ALL");
-                  setSearchQuery("");
-                }}
-                className="text-xs mt-2"
-              >
-                Reset Filters
-              </Button>
-            )}
-          </div>
-        ) : viewMode === "grid" ? (
-          /* Grid View (Matching Documents grid view!) */
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
-            {filteredMeetings.map((meeting) => {
-              const projectName = meeting.project?.name || currentProject?.name || "AI Workspace";
-              const projectBadgeStyle = getProjectBadgeStyle(projectName);
-              const isUp = new Date(meeting.startsAt || meeting.createdAt) >= now;
-              const hasContentForAi = Boolean(meeting.notes || meeting.transcriptText);
-
-              return (
-                <div
-                  key={meeting.id}
-                  onClick={() => openDetailModal(meeting)}
-                  className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs hover:border-slate-300 transition-all cursor-pointer flex flex-col justify-between space-y-3.5 group"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1 font-mono text-[11px] text-slate-600 bg-slate-50 border border-slate-200/80 px-2 py-0.5 rounded-md">
-                        <Clock className="w-3 h-3 text-blue-600" />
-                        <span>{formatDateTime(meeting.startsAt)}</span>
-                      </span>
-
-                      {isUp ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                          <span>Scheduled</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#E8F5E9] text-[#2D8A60] border border-[#2D8A60]/20">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                          <span>Completed</span>
-                        </span>
-                      )}
-                    </div>
-
-                    <h3 className="text-sm font-bold text-slate-900 font-serif group-hover:text-blue-600 transition-colors line-clamp-2">
-                      {meeting.title}
-                    </h3>
-
-                    {meeting.agenda && (
-                      <p className="text-xs text-slate-600 line-clamp-2 bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
-                        <strong className="text-slate-800">Agenda:</strong> {meeting.agenda}
-                      </p>
-                    )}
-
-                    {meeting.notes && (
-                      <p className="text-[11px] text-slate-500 line-clamp-2 italic">
-                        {meeting.notes}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border truncate max-w-[130px] ${projectBadgeStyle}`}>
-                      {projectName}
-                    </span>
-
-                    <div className="flex items-center gap-1.5">
-                      {meeting.transcriptText && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200/80">
-                          <BookOpen className="w-3 h-3 text-purple-600" />
-                          <span>Transcript</span>
-                        </span>
-                      )}
-
-                      {hasContentForAi && (
-                        <span className="p-1 rounded bg-blue-50 text-blue-600 border border-blue-100" title="AI Analysis Ready">
-                          <Sparkles className="w-3 h-3" />
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          /* Table View (Matching Requirements & Tasks tables!) */
-          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3 px-4 w-[42%]">Meeting</th>
-                    <th className="py-3 px-4 w-[16%]">Project</th>
-                    <th className="py-3 px-4 w-[16%]">Date & Time</th>
-                    <th className="py-3 px-4 w-[14%]">Status</th>
-                    <th className="py-3 px-4 w-[12%]">Artifacts</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
-                  {filteredMeetings.map((meeting) => {
-                    const projectName = meeting.project?.name || currentProject?.name || "AI Workspace";
-                    const projectBadgeStyle = getProjectBadgeStyle(projectName);
-                    const isUp = new Date(meeting.startsAt || meeting.createdAt) >= now;
-                    const hasContentForAi = Boolean(meeting.notes || meeting.transcriptText);
-
-                    return (
-                      <tr
-                        key={meeting.id}
-                        onClick={() => openDetailModal(meeting)}
-                        className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
-                      >
-                        {/* Meeting Title & Agenda Column */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-start gap-2.5">
-                            <span
-                              className="w-2 h-2 rounded-full shrink-0 mt-1.5"
-                              style={{ backgroundColor: isUp ? "#3b82f6" : "#10b981" }}
-                            />
-                            <div className="min-w-0">
-                              <span className="font-medium text-slate-800 group-hover:text-blue-600 transition-colors leading-relaxed">
-                                {meeting.title}
-                              </span>
-                              {meeting.agenda && (
-                                <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5 font-normal">
-                                  {meeting.agenda}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Project */}
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[150px] ${projectBadgeStyle}`}
-                          >
-                            {projectName}
-                          </span>
-                        </td>
-
-                        {/* Schedule Time */}
-                        <td className="py-3 px-4 font-mono text-[11.5px] text-slate-600 whitespace-nowrap">
-                          {formatDateTime(meeting.startsAt)}
-                        </td>
-
-                        {/* Status */}
-                        <td className="py-3 px-4">
-                          {isUp ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                              <span>Scheduled</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60] border border-[#2D8A60]/20">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                              <span>Completed</span>
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Artifacts (Transcript / AI Analysis badge) */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-1.5">
-                            {meeting.transcriptText && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200/80">
-                                <BookOpen className="w-3 h-3 text-purple-600" />
-                                <span>Transcript</span>
-                              </span>
-                            )}
-                            {hasContentForAi && (
-                              <span className="p-1 rounded bg-blue-50 text-blue-600 border border-blue-100" title="AI Analysis Ready">
-                                <Sparkles className="w-3 h-3" />
-                              </span>
-                            )}
-                            {!meeting.transcriptText && !hasContentForAi && (
-                              <span className="text-slate-400 font-sans text-xs">-</span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* CREATE MEETING MODAL (Matching Requirements Create Modal!) */}
-        {showCreateModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div
-              className="fixed inset-0"
-              onClick={() => !submitting && setShowCreateModal(false)}
-            />
-            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
-                    <Calendar className="w-4 h-4" />
-                  </div>
-                  <h2 className="text-base font-bold text-slate-900 font-serif">
-                    Log New Meeting
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+      <div className="space-y-6 max-w-7xl mx-auto pb-16 pt-1">
+        {/* ========================================================================= */}
+        {/* VIEW 1: MEETINGS LIST VIEW (IMAGE 1)                                      */}
+        {/* ========================================================================= */}
+        {view === "list" && (
+          <div className="space-y-6">
+            {/* Top Breadcrumbs and New Meetings Button */}
+            <div className="flex items-start justify-between">
+              <div>
+                <nav className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
+                  <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
+                    Dashboard
+                  </Link>
+                  <span>/</span>
+                  <span className="text-slate-800 font-medium">Meetings</span>
+                </nav>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
+                  Meetings
+                </h1>
+                <p className="text-xs text-slate-500 mt-1">
+                  {filteredMeetings.length} meeting{filteredMeetings.length === 1 ? "" : "s"} across{" "}
+                  {activeProjectsCount} active {activeProjectsCount === 1 ? "project" : "projects"}.
+                </p>
               </div>
 
-              <form onSubmit={handleCreate} className="p-6 space-y-4 overflow-y-auto flex-1">
-                {createErrorMsg && (
-                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{createErrorMsg}</span>
+              {/* + New Meetings Button */}
+              <button
+                type="button"
+                onClick={openNewMeetingView}
+                className="bg-[#3b82f6] hover:bg-blue-600 active:bg-blue-700 text-white font-medium text-xs rounded-xl px-4 py-2.5 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>+ New Meetings</span>
+              </button>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="flex items-center justify-between gap-4">
+              {/* Project: All Dropdown */}
+              <div className="relative" ref={projectDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-normal text-slate-700 hover:border-slate-300 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <span>
+                    Project: {selectedProjectObj ? selectedProjectObj.name : "All"}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {projectDropdownOpen && (
+                  <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedProjectId("ALL");
+                        setProjectDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between ${
+                        selectedProjectId === "ALL"
+                          ? "font-semibold text-blue-600 bg-blue-50/50"
+                          : "text-slate-700"
+                      }`}
+                    >
+                      <span>Project: All</span>
+                      {selectedProjectId === "ALL" && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                    </button>
+                    <div className="border-t border-slate-100 my-1" />
+                    {allProjects.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedProjectId(p.id);
+                          setProjectDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between ${
+                          selectedProjectId === p.id
+                            ? "font-semibold text-blue-600 bg-blue-50/50"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        <span className="truncate">{p.name}</span>
+                        {selectedProjectId === p.id && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Filter meetings... search box */}
+              <div className="relative w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Filter meetings..."
+                  className="w-full h-8 pl-8 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 shadow-2xs"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Meetings Lists */}
+            {loading ? (
+              <div className="py-16 text-center text-xs text-slate-400">
+                Loading meetings...
+              </div>
+            ) : filteredMeetings.length === 0 ? (
+              <div className="py-16 text-center bg-white border border-slate-200 rounded-2xl p-8 shadow-2xs">
+                <p className="text-sm font-medium text-slate-700">No meetings found</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {searchQuery
+                    ? `No meetings match "${searchQuery}"`
+                    : "No meetings logged yet for the selected project filter."}
+                </p>
+                <button
+                  type="button"
+                  onClick={openNewMeetingView}
+                  className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  + New Meetings
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* UPCOMING SECTION */}
+                {upcomingMeetings.length > 0 && (
+                  <div className="space-y-3">
+                    <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                      <span>Upcoming</span>
+                      <span className="text-xs font-normal text-slate-400">
+                        {upcomingMeetings.length}
+                      </span>
+                    </h2>
+                    <div className="space-y-3">
+                      {upcomingMeetings.map((m) => {
+                        const dateBadge = formatDateBadge(m.startsAt);
+                        const meetingAttendees = m.attendees || [];
+
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => openDetailView(m)}
+                            className="bg-white border border-slate-200/80 hover:border-slate-300 rounded-2xl p-4 flex items-center justify-between shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-4 min-w-0">
+                              {/* Date Square Badge */}
+                              <div className="w-12 h-12 rounded-xl bg-slate-100/90 border border-slate-200/80 flex flex-col items-center justify-center shrink-0">
+                                <span className="text-base font-bold text-slate-800 leading-none">
+                                  {dateBadge.day}
+                                </span>
+                                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider leading-none mt-1">
+                                  {dateBadge.month}
+                                </span>
+                              </div>
+
+                              {/* Title and Project Pill */}
+                              <div className="min-w-0">
+                                <h3 className="text-sm font-semibold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                                  {m.title}
+                                </h3>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${getProjectBadgeStyle(
+                                      m.projectName || m.project?.name
+                                    )}`}
+                                  >
+                                    {m.projectName || m.project?.name || "Workspace"}
+                                  </span>
+                                  <span className="text-xs text-slate-400 font-normal">
+                                    {formatMeetingTime(m.startsAt)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Overlapping Attendee Avatars */}
+                            {meetingAttendees.length > 0 && (
+                              <div className="flex items-center -space-x-1.5 shrink-0 pl-4">
+                                {meetingAttendees.map((att: any, idx: number) => {
+                                  const avatar = getAttendeeAvatar(att);
+                                  return (
+                                    <div
+                                      key={att.userId || att.id || idx}
+                                      title={att.displayName || att.email || "Member"}
+                                      className={`w-6 h-6 rounded-full text-[10px] font-semibold text-white ring-2 ring-white flex items-center justify-center ${avatar.color}`}
+                                    >
+                                      {avatar.initials}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
-                {/* Project Selector */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Project Workspace *</label>
-                  <select
-                    value={createProjectId}
-                    onChange={(e) => setCreateProjectId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                  >
-                    {activeProjectsList.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.key})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* PAST SECTION */}
+                {pastMeetings.length > 0 && (
+                  <div className="space-y-3">
+                    <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                      <span>Past</span>
+                      <span className="text-xs font-normal text-slate-400">
+                        {pastMeetings.length}
+                      </span>
+                    </h2>
+                    <div className="space-y-3">
+                      {pastMeetings.map((m) => {
+                        const dateBadge = formatDateBadge(m.startsAt);
+                        const meetingAttendees = m.attendees || [];
 
-                {/* Title */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Meeting Title *</label>
-                  <Input
-                    required
-                    value={createTitle}
-                    onChange={(e) => setCreateTitle(e.target.value)}
-                    placeholder="e.g. Sprint Planning & Architecture Review"
-                    className="text-xs h-9 font-medium"
-                  />
-                </div>
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => openDetailView(m)}
+                            className="bg-white border border-slate-200/80 hover:border-slate-300 rounded-2xl p-4 flex items-center justify-between shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-4 min-w-0">
+                              {/* Date Square Badge */}
+                              <div className="w-12 h-12 rounded-xl bg-slate-100/90 border border-slate-200/80 flex flex-col items-center justify-center shrink-0">
+                                <span className="text-base font-bold text-slate-800 leading-none">
+                                  {dateBadge.day}
+                                </span>
+                                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider leading-none mt-1">
+                                  {dateBadge.month}
+                                </span>
+                              </div>
 
-                {/* Date, Start Time, End Time */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Date *</label>
-                    <input
-                      type="date"
-                      required
-                      value={createDate}
-                      onChange={(e) => setCreateDate(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                    />
+                              {/* Title and Project Pill */}
+                              <div className="min-w-0">
+                                <h3 className="text-sm font-semibold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                                  {m.title}
+                                </h3>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${getProjectBadgeStyle(
+                                      m.projectName || m.project?.name
+                                    )}`}
+                                  >
+                                    {m.projectName || m.project?.name || "Workspace"}
+                                  </span>
+                                  <span className="text-xs text-slate-400 font-normal">
+                                    {formatMeetingTime(m.startsAt)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Overlapping Attendee Avatars */}
+                            {meetingAttendees.length > 0 && (
+                              <div className="flex items-center -space-x-1.5 shrink-0 pl-4">
+                                {meetingAttendees.map((att: any, idx: number) => {
+                                  const avatar = getAttendeeAvatar(att);
+                                  return (
+                                    <div
+                                      key={att.userId || att.id || idx}
+                                      title={att.displayName || att.email || "Member"}
+                                      className={`w-6 h-6 rounded-full text-[10px] font-semibold text-white ring-2 ring-white flex items-center justify-center ${avatar.color}`}
+                                    >
+                                      {avatar.initials}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Start Time *</label>
-                    <input
-                      type="time"
-                      required
-                      value={createStartTime}
-                      onChange={(e) => setCreateStartTime(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">End Time *</label>
-                    <input
-                      type="time"
-                      required
-                      value={createEndTime}
-                      onChange={(e) => setCreateEndTime(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                {/* Agenda */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Agenda (Optional)</label>
-                  <Input
-                    value={createAgenda}
-                    onChange={(e) => setCreateAgenda(e.target.value)}
-                    placeholder="e.g. Discuss pgvector indexing and API specifications"
-                    className="text-xs h-9"
-                  />
-                </div>
-
-                {/* Notes */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Meeting Notes & Summary</label>
-                  <textarea
-                    rows={3}
-                    value={createNotes}
-                    onChange={(e) => setCreateNotes(e.target.value)}
-                    placeholder="Document decisions, conclusions, open questions, and next steps..."
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-
-                {/* Raw Transcript */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Raw Transcript (Optional)</label>
-                    <span className="text-[10px] text-slate-400">Zoom / Teams transcript text</span>
-                  </div>
-                  <textarea
-                    rows={3}
-                    value={createTranscriptText}
-                    onChange={(e) => setCreateTranscriptText(e.target.value)}
-                    placeholder="Paste full transcript text here for AI extraction of action items..."
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-mono text-[11px] shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowCreateModal(false)}
-                    className="text-xs"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={submitting}
-                    className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
-                  >
-                    {submitting ? "Saving..." : "Log Meeting"}
-                  </Button>
-                </div>
-              </form>
-            </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        {/* MEETING DETAIL / EDIT MODAL (Matching Requirements Detail Modal!) */}
-        {activeMeeting && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-            <div
-              className="fixed inset-0"
-              onClick={() => !editSubmitting && setActiveMeeting(null)}
-            />
-            <div className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{
-                      backgroundColor:
-                        new Date(activeMeeting.startsAt || activeMeeting.createdAt) >= now
-                          ? "#3b82f6"
-                          : "#10b981",
-                    }}
-                  />
-                  <span className="font-mono text-xs text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                    {formatDateTime(activeMeeting.startsAt)}
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium border truncate max-w-[180px] ${getProjectBadgeStyle(
-                      activeMeeting.project?.name || currentProject?.name
-                    )}`}
-                  >
-                    {activeMeeting.project?.name || currentProject?.name || "Workspace"}
-                  </span>
-                </div>
+        {/* ========================================================================= */}
+        {/* VIEW 2: MEETING DETAIL VIEW (IMAGE 2)                                     */}
+        {/* ========================================================================= */}
+        {view === "detail" && activeMeeting && (
+          <div className="space-y-5">
+            {/* Top Breadcrumbs */}
+            <nav className="flex items-center gap-1.5 text-xs text-slate-500">
+              <Link href="/projects" className="text-[#2563eb] hover:underline font-medium">
+                Projects
+              </Link>
+              <span>/</span>
+              <button
+                type="button"
+                onClick={handleBackToList}
+                className="text-slate-800 hover:text-slate-900 font-medium cursor-pointer"
+              >
+                Meetings
+              </button>
+            </nav>
+
+            {/* Filter and Search Bar Row */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative" ref={projectDropdownRef}>
                 <button
                   type="button"
-                  onClick={() => setActiveMeeting(null)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
+                  onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-normal text-slate-700 hover:border-slate-300 shadow-2xs transition-colors cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <span>
+                    Project: {selectedProjectObj ? selectedProjectObj.name : "All"}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </button>
               </div>
 
-              {/* Form Content */}
-              <form onSubmit={handleUpdate} className="p-6 space-y-4 overflow-y-auto flex-1">
-                {/* Title */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Meeting Title *</label>
-                  <Input
-                    required
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    className="text-xs h-9 font-medium"
-                  />
+              <div className="relative w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter meetings..."
+                  disabled
+                  className="w-full h-8 pl-8 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-400 shadow-2xs cursor-not-allowed"
+                />
+              </div>
+            </div>
+
+            {/* Back to Meetings link */}
+            <div>
+              <button
+                type="button"
+                onClick={handleBackToList}
+                className="text-xs text-blue-600 hover:underline flex items-center gap-1.5 font-medium cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Meetings</span>
+              </button>
+            </div>
+
+            {/* Title and Edit Button Header */}
+            <div className="flex items-center justify-between pt-1">
+              <h1 className="text-lg font-semibold text-slate-900">
+                {activeMeeting.title}
+              </h1>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMeeting(activeMeeting)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-red-200 bg-white hover:bg-red-50 text-xs font-medium text-red-600 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3 text-red-500" />
+                  <span>Delete</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openEditView(activeMeeting)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Pencil className="w-3 h-3 text-slate-500" />
+                  <span>Edit</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2-Column Detail Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start pt-1">
+              {/* Left Column (col-span-2): Notes Card */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-2xs">
+                  <h2 className="text-sm font-semibold text-slate-900 mb-3">Notes</h2>
+                  <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
+                    {activeMeeting.notes || "No notes recorded for this meeting yet."}
+                  </p>
                 </div>
 
-                {/* Agenda */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Agenda</label>
-                  <Input
-                    value={editAgenda}
-                    onChange={(e) => setEditAgenda(e.target.value)}
-                    placeholder="Meeting agenda items..."
-                    className="text-xs h-9"
-                  />
+                {/* AI Meeting Analysis Section */}
+                {(activeMeeting.notes || activeMeeting.transcriptText) && (
+                  <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                        AI Meeting Analysis
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Synthesize action items, requirements, and architectural decisions from notes.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleGenerateAnalysis(activeMeeting)}
+                      disabled={generatingProposalId === activeMeeting.id}
+                      className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-medium px-3.5 py-1.5 rounded-lg shadow-2xs transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>
+                        {generatingProposalId === activeMeeting.id
+                          ? "Analyzing..."
+                          : "Generate AI Proposals"}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column (col-span-1): Details and Attendees */}
+              <div className="space-y-4">
+                {/* Details Card */}
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs">
+                  <h2 className="text-sm font-semibold text-slate-900 mb-4">Details</h2>
+                  <div className="space-y-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Project</span>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${getProjectBadgeStyle(
+                          activeMeeting.projectName || activeMeeting.project?.name
+                        )}`}
+                      >
+                        {activeMeeting.projectName || activeMeeting.project?.name || "Workspace"}
+                      </span>
+                    </div>
+                    <div className="border-t border-slate-100" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Date</span>
+                      <span className="text-slate-800 font-medium">
+                        {formatDetailDate(activeMeeting.startsAt)}
+                      </span>
+                    </div>
+                    <div className="border-t border-slate-100" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Time</span>
+                      <span className="text-slate-800 font-medium">
+                        {formatMeetingTime(activeMeeting.startsAt)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Notes */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Meeting Notes & Summary</label>
-                  <textarea
-                    rows={3}
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    placeholder="Minutes, decisions, and action conclusions..."
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
-                  />
-                </div>
-
-                {/* Transcript Viewer / Editor */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Meeting Transcript</label>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {editTranscript ? "Recorded transcript text" : "Optional"}
+                {/* Attendees Card */}
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-semibold text-slate-900">Attendees</h2>
+                    <span className="text-xs text-slate-400 font-normal">
+                      {activeMeetingAttendees.length}
                     </span>
                   </div>
-                  <textarea
-                    rows={4}
-                    value={editTranscript}
-                    onChange={(e) => setEditTranscript(e.target.value)}
-                    placeholder="Paste or view full meeting transcript here..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 font-mono text-[11px] shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed"
+                  {activeMeetingAttendees.length === 0 ? (
+                    <p className="text-xs text-slate-400">No attendees recorded.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {activeMeetingAttendees.map((att: any, idx: number) => {
+                        const avatar = getAttendeeAvatar(att);
+                        return (
+                          <div key={att.userId || att.id || idx} className="flex items-center gap-3">
+                            <div
+                              className={`w-7 h-7 rounded-full text-xs font-semibold text-white flex items-center justify-center shrink-0 ${avatar.color}`}
+                            >
+                              {avatar.initials}
+                            </div>
+                            <span className="text-xs font-medium text-slate-800">
+                              {att.displayName || att.email || "Member"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW 3: NEW MEETING FORM VIEW (IMAGE 3)                                   */}
+        {/* ========================================================================= */}
+        {view === "new" && (
+          <div className="space-y-5">
+            {/* Top Breadcrumbs */}
+            <nav className="flex items-center gap-1.5 text-xs text-slate-500">
+              <Link href="/projects" className="text-[#2563eb] hover:underline font-medium">
+                Projects
+              </Link>
+              <span>/</span>
+              <button
+                type="button"
+                onClick={handleBackToList}
+                className="text-slate-800 hover:text-slate-900 font-medium cursor-pointer"
+              >
+                Meetings
+              </button>
+            </nav>
+
+            {/* Filter and Search Bar Row */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-normal text-slate-700 shadow-2xs"
+                >
+                  <span>Project: {selectedProjectObj ? selectedProjectObj.name : "All"}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="relative w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter meetings..."
+                  disabled
+                  className="w-full h-8 pl-8 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-400 shadow-2xs cursor-not-allowed"
+                />
+              </div>
+            </div>
+
+            {/* Back to Meetings link */}
+            <div>
+              <button
+                type="button"
+                onClick={handleBackToList}
+                className="text-xs text-blue-600 hover:underline flex items-center gap-1.5 font-medium cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Meetings</span>
+              </button>
+            </div>
+
+            <h1 className="text-sm font-semibold text-slate-900 pt-1">
+              New meeting
+            </h1>
+
+            {/* Form Card */}
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-6 max-w-2xl shadow-2xs">
+              <form onSubmit={handleCreateMeeting} className="space-y-4">
+                {/* Title */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    value={formTitle}
+                    onChange={(e) => setFormTitle(e.target.value)}
+                    placeholder="e.g. Sprint Planning"
+                    required
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
                   />
                 </div>
 
-                {/* Cross-Workflow Actions Hub */}
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-                  {/* Analyze with AI */}
-                  {(activeMeeting.notes || activeMeeting.transcriptText) && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={generatingProposalId === activeMeeting.id}
-                      onClick={() => handleGenerateAnalysis(activeMeeting)}
-                      className="h-8 text-xs border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 gap-1.5 px-3"
-                    >
-                      <Sparkles className={`w-3.5 h-3.5 ${generatingProposalId === activeMeeting.id ? "animate-spin" : "text-blue-600"}`} />
-                      <span>{generatingProposalId === activeMeeting.id ? "Analyzing..." : "Analyze with AI"}</span>
-                    </Button>
-                  )}
+                {/* 3-Col Row: Project, Date, Time */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Project */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                      Project
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={formProjectId}
+                        onChange={(e) => setFormProjectId(e.target.value)}
+                        className="w-full appearance-none border border-slate-300 rounded-lg px-3 py-2 pr-8 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs cursor-pointer"
+                      >
+                        {allProjects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
 
-                  {/* Add Task Link */}
-                  <Link
-                    href={`/tasks?create=true&meetingId=${activeMeeting.id}&title=${encodeURIComponent(
-                      `Follow-up from meeting: ${activeMeeting.title}`
-                    )}`}
-                  >
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
-                    >
-                      <CheckSquare className="w-3.5 h-3.5 text-[#2D8A60]" />
-                      <span>Add Task</span>
-                    </Button>
-                  </Link>
+                  {/* Date */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                      Date
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={formDate}
+                        onChange={(e) => setFormDate(e.target.value)}
+                        required
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                      />
+                    </div>
+                  </div>
 
-                  {/* Create REQ Link */}
-                  <Link
-                    href={`/requirements?create=true&title=${encodeURIComponent(
-                      `Requirement from meeting: ${activeMeeting.title}`
-                    )}`}
-                  >
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
-                    >
-                      <FileCheck2 className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Create REQ</span>
-                    </Button>
-                  </Link>
-
-                  {/* Log Decision Link */}
-                  <Link
-                    href={`/decisions?create=true&title=${encodeURIComponent(
-                      `Decision from: ${activeMeeting.title}`
-                    )}`}
-                  >
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 px-3"
-                    >
-                      <GitPullRequest className="w-3.5 h-3.5 text-purple-600" />
-                      <span>Log Decision</span>
-                    </Button>
-                  </Link>
-
-                  {/* Ask Copilot */}
-                  <Link
-                    href={`/assistant?prompt=${encodeURIComponent(
-                      `Summarize meeting "${activeMeeting.title}". Agenda: "${activeMeeting.agenda || ""}". Notes: "${
-                        activeMeeting.notes || ""
-                      }". What key conclusions and follow-ups should be tracked?`
-                    )}&mode=PM`}
-                  >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs text-slate-600 hover:text-slate-900 gap-1.5 px-2.5"
-                    >
-                      <Bot className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Copilot</span>
-                    </Button>
-                  </Link>
+                  {/* Time */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                      Time
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formTime}
+                        onChange={(e) => setFormTime(e.target.value)}
+                        placeholder="10:00 AM"
+                        required
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-8 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                      />
+                      <Clock className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
                 </div>
 
-                {/* Footer buttons */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDelete}
-                    className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-1 px-2.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete</span>
-                  </Button>
+                {/* Real Attendees Circular Checkbox Selector */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-2">
+                    Attendees
+                  </label>
+                  {availableMembers.length === 0 ? (
+                    <p className="text-xs text-slate-400">No project members found for this project.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableMembers.map((m) => {
+                        const isChecked = selectedAttendeeUserIds.includes(m.id);
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => toggleAttendee(m.id)}
+                            className="flex items-center gap-2.5 cursor-pointer select-none py-0.5 group"
+                          >
+                            <div
+                              className={`w-4 h-4 rounded-full flex items-center justify-center transition-all ${
+                                isChecked
+                                  ? "bg-blue-600 text-white"
+                                  : "border-2 border-blue-500 bg-white group-hover:border-blue-600"
+                              }`}
+                            >
+                              {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                            </div>
+                            <span className="text-xs text-slate-800 group-hover:text-slate-900">
+                              {m.displayName || m.name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setActiveMeeting(null)}
-                      className="text-xs"
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={editSubmitting}
-                      className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs px-4"
-                    >
-                      {editSubmitting ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </div>
+                {/* Notes / Agendas */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                    Notes / Agendas
+                  </label>
+                  <textarea
+                    value={formNotes}
+                    onChange={(e) => setFormNotes(e.target.value)}
+                    placeholder="What was discussed or will be discussed?"
+                    rows={4}
+                    className="w-full border border-slate-300 rounded-lg p-3 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs resize-none"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleBackToList}
+                    className="border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-medium px-4 py-2 rounded-lg shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    {submitting ? "Creating..." : "Create Meeting"}
+                  </button>
                 </div>
               </form>
             </div>
           </div>
         )}
 
-        {/* AI Analysis Proposal Review Dialog */}
-        {activeProposal && currentProject && (
+        {/* ========================================================================= */}
+        {/* VIEW 4: EDIT MEETING FORM VIEW (IMAGE 4)                                  */}
+        {/* ========================================================================= */}
+        {view === "edit" && activeMeeting && (
+          <div className="space-y-5">
+            {/* Top Breadcrumbs */}
+            <nav className="flex items-center gap-1.5 text-xs text-slate-500">
+              <Link href="/projects" className="text-[#2563eb] hover:underline font-medium">
+                Projects
+              </Link>
+              <span>/</span>
+              <button
+                type="button"
+                onClick={handleBackToList}
+                className="text-slate-800 hover:text-slate-900 font-medium cursor-pointer"
+              >
+                Meetings
+              </button>
+            </nav>
+
+            {/* Filter and Search Bar Row */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-normal text-slate-700 shadow-2xs"
+                >
+                  <span>Project: {selectedProjectObj ? selectedProjectObj.name : "All"}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="relative w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter meetings..."
+                  disabled
+                  className="w-full h-8 pl-8 pr-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-400 shadow-2xs cursor-not-allowed"
+                />
+              </div>
+            </div>
+
+            {/* Back to Meeting title link */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setView("detail")}
+                className="text-xs text-blue-600 hover:underline flex items-center gap-1.5 font-medium cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>{activeMeeting.title}</span>
+              </button>
+            </div>
+
+            <h1 className="text-sm font-semibold text-slate-900 pt-1">
+              Edit meeting
+            </h1>
+
+            {/* Form Card */}
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-6 max-w-2xl shadow-2xs">
+              <form onSubmit={handleSaveEditMeeting} className="space-y-4">
+                {/* Title */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    value={formTitle}
+                    onChange={(e) => setFormTitle(e.target.value)}
+                    required
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                  />
+                </div>
+
+                {/* 3-Col Row: Project, Date, Time */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Project */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                      Project
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={formProjectId}
+                        onChange={(e) => setFormProjectId(e.target.value)}
+                        className="w-full appearance-none border border-slate-300 rounded-lg px-3 py-2 pr-8 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs cursor-pointer"
+                      >
+                        {allProjects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Date */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                      Date
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={formDate}
+                        onChange={(e) => setFormDate(e.target.value)}
+                        required
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Time */}
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                      Time
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formTime}
+                        onChange={(e) => setFormTime(e.target.value)}
+                        placeholder="10:00 AM"
+                        required
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 pr-8 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                      />
+                      <Clock className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Real Attendees Circular Checkbox Selector */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-2">
+                    Attendees
+                  </label>
+                  {availableMembers.length === 0 ? (
+                    <p className="text-xs text-slate-400">No project members found for this project.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableMembers.map((m) => {
+                        const isChecked = selectedAttendeeUserIds.includes(m.id);
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => toggleAttendee(m.id)}
+                            className="flex items-center gap-2.5 cursor-pointer select-none py-0.5 group"
+                          >
+                            <div
+                              className={`w-4 h-4 rounded-full flex items-center justify-center transition-all ${
+                                isChecked
+                                  ? "bg-blue-600 text-white"
+                                  : "border-2 border-blue-500 bg-white group-hover:border-blue-600"
+                              }`}
+                            >
+                              {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                            </div>
+                            <span className="text-xs text-slate-800 group-hover:text-slate-900">
+                              {m.displayName || m.name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes / Agendas */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">
+                    Notes / Agendas
+                  </label>
+                  <textarea
+                    value={formNotes}
+                    onChange={(e) => setFormNotes(e.target.value)}
+                    rows={4}
+                    className="w-full border border-slate-300 rounded-lg p-3 text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs resize-none"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setView("detail")}
+                    className="border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-medium px-4 py-2 rounded-lg shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    {submitting ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* AI Proposal Review Dialog */}
+        {activeProposal && (
           <ProposalReviewDialog
             isOpen={!!activeProposal}
-            onClose={() => setActiveProposal(null)}
             proposal={activeProposal}
-            projectId={currentProject.id}
-            onConfirmed={(resultRecordIds) => {
-              showToast(`Created ${resultRecordIds.length} records from meeting analysis!`, "success");
+            projectId={activeMeeting?.projectId || currentProject?.id || ""}
+            onClose={() => setActiveProposal(null)}
+            onConfirmed={() => {
               setActiveProposal(null);
+              showToast("Applied AI proposal to project!", "success");
               loadData();
-            }}
-            onRejected={() => {
-              showToast("Meeting analysis discarded", "info");
-              setActiveProposal(null);
             }}
           />
         )}
+
+        {/* DELETE MEETING CONFIRMATION MODAL */}
+        <DeleteConfirmModal
+          isOpen={!!deleteConfirmMeeting}
+          onClose={() => !deletingMeeting && setDeleteConfirmMeeting(null)}
+          onConfirm={handleConfirmDeleteMeeting}
+          title="Delete meeting"
+          itemName={deleteConfirmMeeting?.title}
+          itemType="meeting"
+          warningText="This action cannot be undone. All meeting transcripts, agendas, notes, and attendance records will be permanently removed."
+          confirmText="Delete meeting"
+          loading={deletingMeeting}
+        />
       </div>
     </AppLayout>
   );

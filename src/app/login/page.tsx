@@ -71,7 +71,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<AuthMode>("login");
 
   // Form fields (pre-filled with demo account per user instruction)
-  const [email, setEmail] = useState("alice@example.com");
+  const [email, setEmail] = useState("codex@example.com");
   const [password, setPassword] = useState("Password123!");
   const [confirmPassword, setConfirmPassword] = useState("Password123!");
   const [showPassword, setShowPassword] = useState(false);
@@ -512,17 +512,17 @@ export default function LoginPage() {
                 <span className="text-slate-400">Quick fill:</span>
                 <button
                   type="button"
-                  onClick={() => fillDemoAccount("alice@example.com", "Password123!")}
-                  className="font-medium text-[#4361ee] hover:underline bg-blue-50 px-2 py-0.5 rounded border border-blue-100 transition-colors"
+                  onClick={() => fillDemoAccount("codex@example.com", "Password123!")}
+                  className="font-medium text-slate-700 hover:underline bg-slate-100 px-2 py-0.5 rounded border border-slate-200 transition-colors"
                 >
-                  Alice (Dev)
+                  Codex (Admin)
                 </button>
                 <button
                   type="button"
-                  onClick={() => fillDemoAccount("admin@example.com", "Password123!")}
-                  className="font-medium text-slate-700 hover:underline bg-slate-100 px-2 py-0.5 rounded border border-slate-200 transition-colors"
+                  onClick={() => fillDemoAccount("claude@example.com", "Password123!")}
+                  className="font-medium text-[#4361ee] hover:underline bg-blue-50 px-2 py-0.5 rounded border border-blue-100 transition-colors"
                 >
-                  Admin
+                  Claude (Member)
                 </button>
               </div>
 

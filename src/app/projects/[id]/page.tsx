@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import {
   Calendar,
   Clock,
@@ -2633,53 +2634,16 @@ export default function ProjectDetailPage() {
         {/* =========================================================================
             DELETE CONFIRMATION MODAL (matching media_1790901805661.png)
            ========================================================================= */}
-        {docToDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-6 space-y-4 animate-in zoom-in-95">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 font-serif">
-                    Indexing Status
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    &ldquo;{String(docToDelete.title || docToDelete.originalFilename || "Document")}&rdquo; will be permanently removed.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setDocToDelete(null)}
-                  className="text-slate-400 hover:text-slate-600 text-sm"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs leading-relaxed flex items-start gap-2.5">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>
-                  This can&apos;t be undone. If it&apos;s already indexed, the AI Copilot will no longer be able to reference it once that feature ships.
-                </span>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDocToDelete(null)}
-                  className="text-xs rounded-lg h-8 px-3"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleDeleteDocument}
-                  className="text-xs bg-[#c0392b] hover:bg-[#a93226] text-white rounded-lg h-8 px-3"
-                >
-                  Delete document
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
+        <DeleteConfirmModal
+          isOpen={!!docToDelete}
+          onClose={() => setDocToDelete(null)}
+          onConfirm={handleDeleteDocument}
+          title="Delete document"
+          itemName={docToDelete ? String(docToDelete.title || docToDelete.originalFilename || "Document") : undefined}
+          itemType="document"
+          warningText="This action cannot be undone. If it is already indexed, the AI Copilot will no longer be able to reference it."
+          confirmText="Delete document"
+        />
 
         {/* =========================================================================
             INVITE MEMBER MODAL

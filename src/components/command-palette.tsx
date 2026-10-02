@@ -21,6 +21,7 @@ import {
   Loader2,
   Users,
   CornerDownLeft,
+  Code2,
 } from "lucide-react";
 
 interface PaletteItem {
@@ -342,10 +343,24 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           break;
         case "GITHUB_ISSUE":
           icon = Layers;
-          href = `/integrations?search=${encodeURIComponent(item.title)}`;
+          href = `/integrations?app=github&search=${encodeURIComponent(item.title)}`;
           iconColorClass = "text-slate-700 bg-slate-100";
-          tagLabel = "GitHub";
+          tagLabel = "GitHub Issue";
           tagColor = "bg-slate-900 text-white border-slate-700";
+          break;
+        case "GITHUB_PR":
+          icon = GitPullRequest;
+          href = `/integrations?app=github&tab=pulls&search=${encodeURIComponent(item.title)}`;
+          iconColorClass = "text-emerald-700 bg-emerald-50";
+          tagLabel = "GitHub PR";
+          tagColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
+          break;
+        case "GITHUB_CODE":
+          icon = Code2;
+          href = `/integrations?app=github&tab=code&search=${encodeURIComponent(item.title)}`;
+          iconColorClass = "text-indigo-700 bg-indigo-50";
+          tagLabel = "Source Code";
+          tagColor = "bg-indigo-50 text-indigo-700 border-indigo-200";
           break;
       }
 
