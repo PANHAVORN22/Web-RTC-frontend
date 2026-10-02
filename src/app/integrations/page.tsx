@@ -40,9 +40,6 @@ import {
   ChevronRight,
   Boxes,
   Plus,
-  MessageSquareQuote,
-  FileText,
-  Calendar,
   GitPullRequest,
   GitBranch,
   FileCode,
@@ -251,7 +248,6 @@ export default function IntegrationsPage() {
   const [activeGuideTab, setActiveGuideTab] = useState<"prompt" | "cursor" | "claude" | "codex" | "antigravity">("prompt");
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
-  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
 
   // Active Connection for multi-repo
   const activeConnection =
@@ -504,95 +500,6 @@ export default function IntegrationsPage() {
   };
 
   const projectKey = currentProject?.key || "AIW";
-
-  const handleCopyPrompt = async (text: string, id: string) => {
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textArea);
-      }
-    } catch {
-      // safe fallback
-    }
-    setCopiedPromptId(id);
-    setTimeout(() => setCopiedPromptId(null), 2000);
-    showToast("Prompt copied to clipboard!", "success");
-  };
-
-  const agentCapabilities = [
-    {
-      id: "update_task_status",
-      tool: "update_task_status",
-      badge: "Kanban Sync",
-      badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
-      iconBg: "bg-emerald-50 text-emerald-600 border-emerald-100",
-      hoverBorder: "hover:border-emerald-200",
-      icon: CheckCircle2,
-      description: "Agent updates Kanban cards and dashboard metrics in real-time when work is finished.",
-      prompt: `I just completed the OpenAI embeddings service and tests. Update ${projectKey}-TSK-12 to DONE with a summary.`,
-    },
-    {
-      id: "get_decision",
-      tool: "get_decision",
-      badge: "Architecture ADR",
-      badgeColor: "bg-indigo-50 text-indigo-700 border-indigo-200/80",
-      iconBg: "bg-indigo-50 text-indigo-600 border-indigo-100",
-      hoverBorder: "hover:border-indigo-200",
-      icon: Sparkles,
-      description: "Agent reads accepted Architectural Decisions (ADRs) to guarantee code follows project standards.",
-      prompt: `Read accepted architectural decision ${projectKey}-DEC-1 before designing this feature module.`,
-    },
-    {
-      id: "create_requirement",
-      tool: "create_requirement",
-      badge: "Requirements Spec",
-      badgeColor: "bg-sky-50 text-sky-700 border-sky-200/80",
-      iconBg: "bg-sky-50 text-sky-600 border-sky-100",
-      hoverBorder: "hover:border-sky-200",
-      icon: FileText,
-      description: "Agent drafts formal requirement specifications and acceptance criteria into the project backlog.",
-      prompt: `Create a requirement for JWT auth refresh token rotation in ${projectKey} with verification criteria.`,
-    },
-    {
-      id: "get_meeting",
-      tool: "get_meeting",
-      badge: "Meeting Sync",
-      badgeColor: "bg-purple-50 text-purple-700 border-purple-200/80",
-      iconBg: "bg-purple-50 text-purple-600 border-purple-100",
-      hoverBorder: "hover:border-purple-200",
-      icon: Calendar,
-      description: "Agent reads sprint meeting notes, transcripts, and action items directly in your IDE.",
-      prompt: `Fetch the agenda and notes from our latest sprint architecture meeting to verify API contracts.`,
-    },
-    {
-      id: "search_workspace",
-      tool: "search_workspace",
-      badge: "Hybrid Vector RAG",
-      badgeColor: "bg-amber-50 text-amber-700 border-amber-200/80",
-      iconBg: "bg-amber-50 text-amber-600 border-amber-100",
-      hoverBorder: "hover:border-amber-200",
-      icon: Search,
-      description: "Agent queries vectorized documentation, past meeting notes, and architecture specs using semantic RAG.",
-      prompt: `Search the project workspace for our database connection timeout policies.`,
-    },
-    {
-      id: "list_github_issues",
-      tool: "list_github_issues",
-      badge: "GitHub VCS Sync",
-      badgeColor: "bg-slate-100 text-slate-800 border-slate-300/80",
-      iconBg: "bg-slate-100 text-slate-700 border-slate-200",
-      hoverBorder: "hover:border-slate-300",
-      icon: GithubIcon,
-      description: "Agent inspects synchronized GitHub issues, labels, and issue numbers to associate with code commits.",
-      prompt: `List open GitHub issues in ${projectKey} to find related bug reports for this feature module.`,
-    },
-  ];
 
   const apiBaseUrl =
     typeof window !== "undefined"
@@ -1415,92 +1322,6 @@ export default function IntegrationsPage() {
                 )}
               </CardContent>
             </Card>
-
-            {/* Agent Capabilities & Example Prompts Grid */}
-            <div className="space-y-4 pt-1">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2 border-b border-slate-200/80">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shadow-2xs">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 font-serif">
-                      What You Can Ask Your Coding Agent To Do
-                    </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Full-platform access across tasks, requirements, architecture ADRs, meetings, documents, dashboard metrics, and GitHub sync.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 self-start sm:self-auto">
-                  <Badge variant="outline" className="text-[10px] font-medium bg-emerald-50/70 text-emerald-800 border-emerald-200 gap-1.5 px-2.5 py-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
-                    24 MCP Tools Active • Full Platform
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {agentCapabilities.map((item) => {
-                  const Icon = item.icon;
-                  const isCopied = copiedPromptId === item.id;
-                  return (
-                    <Card
-                      key={item.id}
-                      className={`rounded-2xl border-slate-200/90 bg-white shadow-xs p-4 flex flex-col justify-between transition-all duration-200 hover:shadow-sm ${item.hoverBorder}`}
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-7 h-7 rounded-lg border flex items-center justify-center shadow-2xs ${item.iconBg}`}>
-                              <Icon className="w-3.5 h-3.5" />
-                            </div>
-                            <span className="font-mono text-xs font-semibold text-slate-900">
-                              {item.tool}
-                            </span>
-                          </div>
-                          <Badge variant="outline" className={`text-[10px] font-medium px-2 py-0.5 rounded-md ${item.badgeColor}`}>
-                            {item.badge}
-                          </Badge>
-                        </div>
-                        <p className="text-[11px] text-slate-600 leading-relaxed">
-                          {item.description}
-                        </p>
-                      </div>
-
-                      <div className="mt-3.5 rounded-xl bg-slate-50/90 border border-slate-200/80 p-3 space-y-2 group/prompt hover:border-slate-300 hover:bg-slate-50 transition-colors">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                            <MessageSquareQuote className="w-3 h-3 text-slate-400" />
-                            Sample Prompt
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleCopyPrompt(item.prompt, item.id)}
-                            className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
-                          >
-                            {isCopied ? (
-                              <>
-                                <Check className="w-2.5 h-2.5 text-emerald-600" />
-                                <span className="text-emerald-700 font-semibold">Copied!</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-2.5 h-2.5 text-slate-400 group-hover/prompt:text-slate-600" />
-                                <span>Copy Prompt</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                        <p className="font-mono text-[11px] text-slate-800 leading-relaxed bg-white rounded-lg p-2.5 border border-slate-200/70 shadow-2xs select-all">
-                          &ldquo;{item.prompt}&rdquo;
-                        </p>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            </div>
           </div>
         )}
 
