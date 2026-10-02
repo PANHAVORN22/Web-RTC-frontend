@@ -27,6 +27,29 @@ import {
   Layers,
   ShieldAlert,
 } from "lucide-react";
+import { CustomDropdown, type CustomDropdownOption } from "@/components/ui/custom-dropdown";
+import { FilterDropdown, type FilterOption } from "@/components/ui/filter-dropdown";
+
+const INVITE_PROF_ROLE_OPTIONS: CustomDropdownOption[] = [
+  { value: "DEVELOPER", label: "Developer" },
+  { value: "PM", label: "Product Manager" },
+  { value: "QA", label: "QA Engineer" },
+  { value: "INFRASTRUCTURE", label: "DevOps / Infra" },
+  { value: "DX", label: "UX / DX" },
+  { value: "PRESENTATION", label: "Technical Writer" },
+];
+
+const INVITE_SYSTEM_ROLE_OPTIONS: CustomDropdownOption[] = [
+  { value: "USER", label: "Member" },
+  { value: "ADMIN", label: "Admin" },
+];
+
+const FILTER_ROLE_OPTIONS: FilterOption[] = [
+  { value: "ADMIN", label: "Admin" },
+  { value: "DEVELOPER", label: "Developer" },
+  { value: "PM", label: "PM" },
+  { value: "QA", label: "QA" },
+];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -466,34 +489,22 @@ export default function TeamPage() {
               {/* Role Selectors */}
               <div className="flex flex-wrap items-center gap-2">
                 {/* Professional Role */}
-                <div className="relative">
-                  <select
-                    value={inviteProfRole}
-                    onChange={(e: any) => setInviteProfRole(e.target.value)}
-                    className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 pr-8 text-xs font-medium text-slate-700 shadow-2xs hover:border-slate-300 focus:outline-none cursor-pointer h-11"
-                  >
-                    <option value="DEVELOPER">Role: Developer</option>
-                    <option value="PM">Role: Product Manager</option>
-                    <option value="QA">Role: QA Engineer</option>
-                    <option value="INFRASTRUCTURE">Role: DevOps / Infra</option>
-                    <option value="DX">Role: UX / DX</option>
-                    <option value="PRESENTATION">Role: Technical Writer</option>
-                  </select>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <CustomDropdown
+                  labelPrefix="Role"
+                  value={inviteProfRole}
+                  onChange={(val) => setInviteProfRole(val as any)}
+                  options={INVITE_PROF_ROLE_OPTIONS}
+                  menuWidth="min-w-[195px]"
+                />
 
                 {/* System Role */}
-                <div className="relative">
-                  <select
-                    value={inviteSystemRole}
-                    onChange={(e: any) => setInviteSystemRole(e.target.value)}
-                    className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 pr-8 text-xs font-medium text-slate-700 shadow-2xs hover:border-slate-300 focus:outline-none cursor-pointer h-11"
-                  >
-                    <option value="USER">Access: Member</option>
-                    <option value="ADMIN">Access: Admin</option>
-                  </select>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
+                <CustomDropdown
+                  labelPrefix="Access"
+                  value={inviteSystemRole}
+                  onChange={(val) => setInviteSystemRole(val as any)}
+                  options={INVITE_SYSTEM_ROLE_OPTIONS}
+                  menuWidth="min-w-[170px]"
+                />
 
                 {/* Submit Button */}
                 <button
@@ -570,20 +581,13 @@ export default function TeamPage() {
 
             <div className="flex flex-wrap items-center gap-2.5">
               {/* Role Filter */}
-              <div className="relative">
-                <select
-                  value={selectedRoleFilter}
-                  onChange={(e) => setSelectedRoleFilter(e.target.value)}
-                  className="appearance-none bg-white border border-slate-200 rounded-lg px-3 py-1.5 pr-8 text-xs font-medium text-slate-700 hover:border-slate-300 shadow-2xs focus:outline-none cursor-pointer h-9"
-                >
-                  <option value="ALL">Role: All</option>
-                  <option value="ADMIN">Role: Admin</option>
-                  <option value="DEVELOPER">Role: Developer</option>
-                  <option value="PM">Role: PM</option>
-                  <option value="QA">Role: QA</option>
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+              <FilterDropdown
+                label="Role"
+                allLabel="All roles"
+                value={selectedRoleFilter}
+                onChange={setSelectedRoleFilter}
+                options={FILTER_ROLE_OPTIONS}
+              />
 
               {/* Search input */}
               <div className="relative flex-1 md:w-56">
