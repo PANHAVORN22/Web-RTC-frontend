@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/context/toast-context";
 import { AppLayout } from "@/components/app-layout";
 import { api } from "@/lib/api";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { parseGitHubRepositoryUrl } from "@/lib/github-repository-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -44,8 +44,9 @@ import {
   GitBranch,
   FileCode,
 } from "lucide-react";
-import { formatDate, formatDateTime } from "@/lib/utils";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { GitHubWorkspace } from "@/components/integrations/github-workspace";
+import { McpConsole } from "@/components/integrations/mcp-console";
 
 // ==========================================
 // BRAND ICONS
@@ -218,14 +219,17 @@ export default function IntegrationsPage() {
   const [repoFiles, setRepoFiles] = useState<any[]>([]);
   const [totalFiles, setTotalFiles] = useState(0);
   const [loadingFiles, setLoadingFiles] = useState(false);
-  const [githubSubTab, setGithubSubTab] = useState<"issues" | "pulls" | "code">("issues");
+  const fileLoadRequest = useRef(0);
+  const [githubLoadErrors, setGithubLoadErrors] = useState<Partial<Record<"code" | "issues" | "pulls", string>>>({});
   const [syncing, setSyncing] = useState(false);
+  const [syncAccessToken, setSyncAccessToken] = useState("");
+  const [indexProgress, setIndexProgress] = useState<{ completed: number; total: number } | null>(null);
   const [syncingCode, setSyncingCode] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [showConnectForm, setShowConnectForm] = useState(false);
-  const [owner, setOwner] = useState("");
-  const [repo, setRepo] = useState("");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [repositoryUrlError, setRepositoryUrlError] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [selectedState, setSelectedState] = useState<string>("all");
@@ -233,11 +237,11 @@ export default function IntegrationsPage() {
   const [issueSearchQuery, setIssueSearchQuery] = useState("");
   const [prSearchQuery, setPrSearchQuery] = useState("");
   const [fileSearchQuery, setFileSearchQuery] = useState("");
-  const [expandedIssues, setExpandedIssues] = useState<Record<string, boolean>>({});
 
   // MCP state
   const [apiKeys, setApiKeys] = useState<any[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(true);
+  const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [showCreateKeyModal, setShowCreateKeyModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyExpiryDays, setNewKeyExpiryDays] = useState<number>(90);
@@ -245,8 +249,6 @@ export default function IntegrationsPage() {
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [keyToRevoke, setKeyToRevoke] = useState<any>(null);
   const [revokingKey, setRevokingKey] = useState(false);
-  const [activeGuideTab, setActiveGuideTab] = useState<"prompt" | "cursor" | "claude" | "codex" | "antigravity">("prompt");
-  const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
 
   // Active Connection for multi-repo
@@ -254,7 +256,6 @@ export default function IntegrationsPage() {
     connections.find((c) => c.id === selectedConnectionId) ||
     connections[0] ||
     null;
-  const isGithubConnected = !!activeConnection && activeConnection.status === "CONNECTED";
 
   // Load GitHub connections
   const loadConnections = useCallback(async () => {
@@ -284,6 +285,7 @@ export default function IntegrationsPage() {
   const loadIssues = useCallback(async (connId?: string) => {
     if (!currentProject) return;
     setLoadingIssues(true);
+    setGithubLoadErrors(previous => ({ ...previous, issues: undefined }));
     try {
       const res = await api.integrations.github.listIssues(currentProject.id, {
         connectionId: connId,
@@ -294,6 +296,7 @@ export default function IntegrationsPage() {
       setIssues(res.items || []);
       setTotalIssues(res.total ?? res.items?.length ?? 0);
     } catch (err: any) {
+      setGithubLoadErrors(previous => ({ ...previous, issues: err.message || "Please try again." }));
       console.error("Failed to load issues:", err);
     } finally {
       setLoadingIssues(false);
@@ -303,6 +306,7 @@ export default function IntegrationsPage() {
   const loadPullRequests = useCallback(async (connId?: string) => {
     if (!currentProject) return;
     setLoadingPrs(true);
+    setGithubLoadErrors(previous => ({ ...previous, pulls: undefined }));
     try {
       const res = await api.integrations.github.listPullRequests(currentProject.id, {
         connectionId: connId,
@@ -313,6 +317,7 @@ export default function IntegrationsPage() {
       setPullRequests(res.items || []);
       setTotalPrs(res.total ?? res.items?.length ?? 0);
     } catch (err: any) {
+      setGithubLoadErrors(previous => ({ ...previous, pulls: err.message || "Please try again." }));
       console.error("Failed to load PRs:", err);
     } finally {
       setLoadingPrs(false);
@@ -321,29 +326,40 @@ export default function IntegrationsPage() {
 
   const loadFiles = useCallback(async (connId?: string) => {
     if (!currentProject) return;
+    const request = ++fileLoadRequest.current;
     setLoadingFiles(true);
+    setGithubLoadErrors(previous => ({ ...previous, code: undefined }));
+    setRepoFiles([]);
     try {
-      const res = await api.integrations.github.listFiles(currentProject.id, {
-        connectionId: connId,
-        q: fileSearchQuery.trim() || undefined,
-        limit: 50,
-      });
-      setRepoFiles(res.items || []);
-      setTotalFiles(res.total ?? res.items?.length ?? 0);
+      const first = await api.integrations.github.listFiles(currentProject.id, { connectionId: connId, limit: 100, page: 1 });
+      if (request !== fileLoadRequest.current) return;
+      const files = [...(first.items || [])];
+      for (let page = 2; files.length < first.total; page++) {
+        const next = await api.integrations.github.listFiles(currentProject.id, { connectionId: connId, limit: 100, page });
+        if (request !== fileLoadRequest.current) return;
+        if (!next.items?.length) break;
+        files.push(...next.items);
+      }
+      if (request !== fileLoadRequest.current) return;
+      setRepoFiles(files);
+      setTotalFiles(first.total ?? files.length);
     } catch (err: any) {
+      if (request === fileLoadRequest.current) setGithubLoadErrors(previous => ({ ...previous, code: err.message || "Please try again." }));
       console.error("Failed to load files:", err);
     } finally {
-      setLoadingFiles(false);
+      if (request === fileLoadRequest.current) setLoadingFiles(false);
     }
-  }, [currentProject, fileSearchQuery]);
+  }, [currentProject]);
 
   // Load Personal Access Tokens
   const loadApiKeys = useCallback(async () => {
     setLoadingKeys(true);
+    setApiKeysError(null);
     try {
       const keys = await api.auth.listApiKeys();
       setApiKeys(Array.isArray(keys) ? keys : []);
     } catch (err: any) {
+      setApiKeysError(err.message || "Please try again.");
       console.error("Failed to load API keys:", err);
     } finally {
       setLoadingKeys(false);
@@ -355,28 +371,29 @@ export default function IntegrationsPage() {
     loadApiKeys();
   }, [loadConnections, loadApiKeys]);
 
-  useEffect(() => {
-    if (activeConnection && activeConnection.status === "CONNECTED") {
-      loadIssues(activeConnection.id);
-      loadPullRequests(activeConnection.id);
-      loadFiles(activeConnection.id);
-    }
-  }, [activeConnection, selectedState, prState, loadIssues, loadPullRequests, loadFiles]);
+  const activeRepositoryId = activeConnection?.status === "CONNECTED" ? activeConnection.id : undefined;
+  useEffect(() => { if (activeRepositoryId) loadIssues(activeRepositoryId); }, [activeRepositoryId, loadIssues]);
+  useEffect(() => { if (activeRepositoryId) loadPullRequests(activeRepositoryId); }, [activeRepositoryId, loadPullRequests]);
+  useEffect(() => { if (activeRepositoryId) loadFiles(activeRepositoryId); }, [activeRepositoryId, loadFiles]);
 
   const handleConnectGithub = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentProject || !owner.trim() || !repo.trim()) return;
+    if (!currentProject) return;
+    const repository = parseGitHubRepositoryUrl(repositoryUrl);
+    if (!repository) {
+      setRepositoryUrlError("Use a GitHub repository link, like https://github.com/owner/repository.");
+      return;
+    }
+    setRepositoryUrlError(null);
     setConnecting(true);
     try {
       const newConn = await api.integrations.github.connect(currentProject.id, {
-        repositoryOwner: owner.trim(),
-        repositoryName: repo.trim(),
+        ...repository,
         accessToken: token.trim() || undefined,
       });
       showToast("Connected GitHub repository successfully!", "success");
       setShowConnectForm(false);
-      setOwner("");
-      setRepo("");
+      setRepositoryUrl("");
       setToken("");
       setSelectedConnectionId(newConn.id);
       await loadConnections();
@@ -391,7 +408,7 @@ export default function IntegrationsPage() {
     if (!currentProject || !activeConnection) return;
     setSyncing(true);
     try {
-      const res = await api.integrations.github.sync(currentProject.id, activeConnection.id);
+      const res = await api.integrations.github.sync(currentProject.id, activeConnection.id, syncAccessToken.trim() || undefined);
       showToast(
         `Sync completed: ${res.syncedCount ?? 0} issues and ${res.syncedPrCount ?? 0} PRs synchronized!`,
         "success"
@@ -403,24 +420,38 @@ export default function IntegrationsPage() {
       showToast(err.message || "Sync failed", "error");
     } finally {
       setSyncing(false);
+      setSyncAccessToken("");
     }
   };
 
   const handleSyncCodebase = async () => {
     if (!currentProject || !activeConnection) return;
     setSyncingCode(true);
+    setIndexProgress(null);
+    let cursor = 0;
+    let treeVersion: string | undefined;
+    let indexed = 0;
+    let unchanged = 0;
     try {
-      const res = await api.integrations.github.syncCode(currentProject.id, activeConnection.id);
-      showToast(
-        `Indexed ${res.indexedFilesCount ?? 0} repository files into vector memory!`,
-        "success"
-      );
+      while (true) {
+        const res = await api.integrations.github.syncCode(currentProject.id, activeConnection.id, syncAccessToken.trim() || undefined, { cursor, treeVersion });
+        indexed += res.indexedFilesCount;
+        unchanged += res.unchangedFilesCount;
+        treeVersion = res.treeVersion;
+        setIndexProgress({ completed: res.nextCursor ?? res.candidateFilesCount, total: res.candidateFilesCount });
+        if (res.nextCursor === null) break;
+        cursor = res.nextCursor;
+      }
       await loadConnections();
       await loadFiles(activeConnection.id);
+      showToast(`Indexing complete: ${indexed} files updated, ${unchanged} unchanged.`, "success");
     } catch (err: any) {
       showToast(err.message || "Codebase indexing failed", "error");
+      await loadConnections();
+      await loadFiles(activeConnection.id);
     } finally {
       setSyncingCode(false);
+      setSyncAccessToken("");
     }
   };
 
@@ -483,20 +514,20 @@ export default function IntegrationsPage() {
         textArea.value = text;
         document.body.appendChild(textArea);
         textArea.select();
-        document.execCommand("copy");
+        const didCopy = document.execCommand("copy");
         document.body.removeChild(textArea);
+        if (!didCopy) throw new Error("Clipboard unavailable");
       }
     } catch {
-      // safe fallback
+      showToast("Could not copy. Please select and copy the text manually.", "error");
+      return false;
     }
     if (isToken) {
       setCopiedToken(true);
       setTimeout(() => setCopiedToken(false), 2000);
-    } else {
-      setCopiedSnippet(true);
-      setTimeout(() => setCopiedSnippet(false), 2000);
     }
     showToast("Copied to clipboard!", "success");
+    return true;
   };
 
   const projectKey = currentProject?.key || "AIW";
@@ -520,11 +551,11 @@ export default function IntegrationsPage() {
 ### Instructions for Agent:
 1. Detect my coding environment (Cursor, Claude Code, Codex, or Google Antigravity) and configure the "ai-workspace" MCP server:
    - In Cursor: add to .cursor/mcp.json
-   - In Claude Code: run \`claude mcp add ai-workspace -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js" -e AI_WORKSPACE_API_URL="${apiBaseUrl}" -e AI_WORKSPACE_API_KEY="${activeTokenValue}" -e AI_WORKSPACE_PROJECT_ID="${projectKey}"\`
-   - In Codex: add to .codex/mcp.json or run \`codex mcp add ai-workspace ...\`
+   - In Claude Code: run \`claude mcp add ai-workspace -e AI_WORKSPACE_API_URL="${apiBaseUrl}" -e AI_WORKSPACE_API_KEY="${activeTokenValue}" -e AI_WORKSPACE_PROJECT_ID="${projectKey}" -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js"\`
+   - In Codex: add to .codex/config.toml or run \`codex mcp add ai-workspace ...\`
    - In Antigravity: add to ~/.gemini/config/mcp_config.json or .agents/mcp_config.json
 2. Test the connection by running MCP tool \`list_tasks\` for project "${projectKey}".
-3. Full Platform Capabilities (24 MCP Tools & Resources):
+3. Full Platform Capabilities (32 MCP Tools plus Resources):
    - Tasks & Kanban: list_tasks, get_task, create_task, update_task_status (real-time board sync)
    - Architecture ADRs: list_decisions, get_decision, propose_decision
    - Requirements: list_requirements, get_requirement, create_requirement, update_requirement_status
@@ -532,8 +563,10 @@ export default function IntegrationsPage() {
    - Documents & RAG: list_documents, get_document, search_workspace (keyword, semantic, hybrid)
    - GitHub VCS: get_github_integration, list_github_issues
    - Workspace Health: get_dashboard, get_activity_stream, list_projects, get_project, list_project_members
+   - Reviewed AI Actions: generate_task_proposal, generate_decision_task_proposal, generate_meeting_analysis, list_ai_proposals, get_ai_proposal, update_ai_proposal, confirm_ai_proposal, reject_ai_proposal
 4. Workflow Rules:
    - Consult accepted architecture decisions (\`list_decisions\`) before making design changes.
+   - AI generation saves drafts only. Review/edit with get_ai_proposal and update_ai_proposal, then confirm only user-authorized selected items using the current version and a stable idempotency key. Reuse that key when retrying. Reject unwanted drafts.
    - When any assigned task is completed and verified, automatically call \`update_task_status\` to set it to "DONE" on our AI Workspace dashboard.`;
 
   // Pre-formatted MCP Configs
@@ -555,27 +588,19 @@ export default function IntegrationsPage() {
     2
   );
 
-  const claudeCodeCommand = `claude mcp add ai-workspace -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js" -e AI_WORKSPACE_API_URL="${apiBaseUrl}" -e AI_WORKSPACE_API_KEY="${activeTokenValue}" -e AI_WORKSPACE_PROJECT_ID="${projectKey}"`;
+  const claudeCodeCommand = `claude mcp add ai-workspace -e AI_WORKSPACE_API_URL="${apiBaseUrl}" -e AI_WORKSPACE_API_KEY="${activeTokenValue}" -e AI_WORKSPACE_PROJECT_ID="${projectKey}" -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js"`;
 
-  const codexConfigJson = JSON.stringify(
-    {
-      mcpServers: {
-        "ai-workspace": {
-          command: "node",
-          args: ["<PATH_TO_BACKEND>/dist/mcp/cli.js"],
-          env: {
-            AI_WORKSPACE_API_URL: apiBaseUrl,
-            AI_WORKSPACE_API_KEY: activeTokenValue,
-            AI_WORKSPACE_PROJECT_ID: projectKey,
-          },
-        },
-      },
-    },
-    null,
-    2
-  );
+  const codexConfigToml = `[mcp_servers.ai-workspace]
+command = "node"
+args = ["<PATH_TO_BACKEND>/dist/mcp/cli.js"]
+env_vars = ["AI_WORKSPACE_API_KEY"]
+tool_timeout_sec = 90
 
-  const codexCommand = `codex mcp add ai-workspace -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js" -e AI_WORKSPACE_API_URL="${apiBaseUrl}" -e AI_WORKSPACE_API_KEY="${activeTokenValue}" -e AI_WORKSPACE_PROJECT_ID="${projectKey}"`;
+[mcp_servers.ai-workspace.env]
+AI_WORKSPACE_API_URL = ${JSON.stringify(apiBaseUrl)}
+AI_WORKSPACE_PROJECT_ID = ${JSON.stringify(projectKey)}`;
+
+  const codexCommand = `codex mcp add ai-workspace --env AI_WORKSPACE_API_URL="${apiBaseUrl}" --env AI_WORKSPACE_API_KEY="${activeTokenValue}" --env AI_WORKSPACE_PROJECT_ID="${projectKey}" -- node "<PATH_TO_BACKEND>/dist/mcp/cli.js"`;
 
   const antigravityConfigJson = JSON.stringify(
     {
@@ -852,1272 +877,76 @@ export default function IntegrationsPage() {
         {/* VIEW 2: CODING AGENTS & MCP APP CONSOLE                                   */}
         {/* ========================================================================= */}
         {activeView === "mcp" && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            {/* Header & Breadcrumb with Back Navigation */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <button
-                  type="button"
-                  onClick={() => navigateToView("directory")}
-                  className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 font-medium transition-colors"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back to Apps Directory</span>
-                </button>
-
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                    Protocol Active
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-xs p-2">
-                    <McpIcon className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
-                      Model Context Protocol (MCP)
-                    </h1>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Personal Access Tokens and configuration guides for Cursor, Claude Code, Codex, and Antigravity.
-                    </p>
-                  </div>
-                </div>
-
-                <Button
-                  onClick={() => {
-                    setRevealedToken(null);
-                    setShowCreateKeyModal(true);
-                  }}
-                  className="bg-codex-accent hover:bg-codex-hover text-white text-xs gap-1.5 shadow-xs rounded-xl px-4 h-9 font-medium shrink-0"
-                >
-                  <Key className="w-3.5 h-3.5" />
-                  <span>Generate Access Token</span>
-                </Button>
-              </div>
-            </div>
-
-
-            {/* Personal Access Tokens Section */}
-            <Card className="rounded-2xl border-slate-200 bg-white shadow-xs">
-              <CardHeader className="p-5 pb-3 border-b border-slate-100 flex flex-row items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center border border-slate-200">
-                    <Key className="w-4 h-4 text-blue-600" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-sm font-bold text-slate-900 font-serif">
-                      Personal Access Tokens (PAT)
-                    </CardTitle>
-                    <p className="text-[11px] text-slate-500">
-                      Tokens authenticate your local coding agents with your user identity and project permissions.
-                    </p>
-                  </div>
-                </div>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setRevealedToken(null);
-                    setShowCreateKeyModal(true);
-                  }}
-                  className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 rounded-lg shadow-2xs font-medium"
-                >
-                  <Key className="w-3.5 h-3.5 text-blue-600" />
-                  <span>New Token</span>
-                </Button>
-              </CardHeader>
-
-              <CardContent className="p-0">
-                {loadingKeys ? (
-                  <div className="p-6 space-y-2">
-                    <div className="h-10 bg-slate-50 rounded-xl animate-pulse" />
-                    <div className="h-10 bg-slate-50 rounded-xl animate-pulse" />
-                  </div>
-                ) : apiKeys.length === 0 ? (
-                  <div className="p-10 text-center space-y-2.5">
-                    <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto border border-blue-100">
-                      <ShieldCheck className="w-5 h-5" />
-                    </div>
-                    <p className="text-xs font-semibold text-slate-800">
-                      No active Personal Access Tokens
-                    </p>
-                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-                      Generate a token to connect Cursor, Claude Code, Codex, or Antigravity. Tokens are securely hashed with SHA-256 at rest.
-                    </p>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setRevealedToken(null);
-                        setShowCreateKeyModal(true);
-                      }}
-                      className="text-xs bg-codex-accent hover:bg-codex-hover text-white rounded-lg mt-2"
-                    >
-                      Create First Token
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-100 bg-slate-50/70 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
-                          <th className="py-2.5 px-5">Token Name</th>
-                          <th className="py-2.5 px-5">Prefix</th>
-                          <th className="py-2.5 px-5">Created</th>
-                          <th className="py-2.5 px-5">Last Used</th>
-                          <th className="py-2.5 px-5">Expires</th>
-                          <th className="py-2.5 px-5 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {apiKeys.map((k) => (
-                          <tr key={k.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="py-3 px-5 font-semibold text-slate-900 font-serif">
-                              {k.name}
-                            </td>
-                            <td className="py-3 px-5 font-mono text-[11px] text-slate-500">
-                              <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                                {k.keyPrefix}...****
-                              </span>
-                            </td>
-                            <td className="py-3 px-5 text-slate-500 font-mono text-[11px]">
-                              {formatDate(k.createdAt)}
-                            </td>
-                            <td className="py-3 px-5 text-slate-500 font-mono text-[11px]">
-                              {k.lastUsedAt ? formatDateTime(k.lastUsedAt) : "Never"}
-                            </td>
-                            <td className="py-3 px-5 text-slate-500 text-[11px]">
-                              {k.expiresAt ? (
-                                <span className="font-mono text-amber-700">
-                                  {formatDate(k.expiresAt)}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400">Never</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-5 text-right">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setKeyToRevoke(k)}
-                                className="h-7 text-[11px] text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-1 px-2 rounded-lg"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Revoke</span>
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Agent Setup Guides & Universal One-Prompt Config */}
-            <Card className="rounded-2xl border-slate-200 bg-white shadow-xs overflow-hidden">
-              <CardHeader className="p-5 pb-3 border-b border-slate-100 bg-slate-50/50">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center border border-blue-200">
-                      <Terminal className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-sm font-bold text-slate-900 font-serif flex items-center gap-2">
-                        <span>Universal Coding Agent Setup</span>
-                        <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] font-semibold py-0">
-                          One-Prompt
-                        </Badge>
-                      </CardTitle>
-                      <p className="text-[11px] text-slate-500">
-                        Copy one prompt for your coding agent (Cursor, Claude Code, Codex, Antigravity) or select manual config.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Sub tabs */}
-                  <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
-                    {[
-                      { id: "prompt" as const, label: "One-Prompt Setup", icon: <Zap className="w-3 h-3 text-amber-500 fill-amber-500" /> },
-                      { id: "cursor" as const, label: "Cursor", icon: <CursorIcon className="w-3 h-3" /> },
-                      { id: "claude" as const, label: "Claude Code", icon: <ClaudeIcon className="w-3 h-3" /> },
-                      { id: "codex" as const, label: "Codex", icon: <CodexIcon className="w-3 h-3 text-slate-800" /> },
-                      { id: "antigravity" as const, label: "Antigravity", icon: <AntigravityIcon className="w-3 h-3 text-indigo-600" /> },
-                    ].map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setActiveGuideTab(t.id)}
-                        className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors flex items-center gap-1.5 whitespace-nowrap ${
-                          activeGuideTab === t.id
-                            ? "bg-slate-900 text-white font-semibold shadow-2xs"
-                            : "text-slate-600 hover:text-slate-900"
-                        }`}
-                      >
-                        {t.icon}
-                        <span>{t.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent className="p-5 space-y-4">
-                {/* 1. UNIVERSAL ONE-PROMPT SETUP (DEFAULT) */}
-                {activeGuideTab === "prompt" && (
-                  <div className="space-y-4">
-                    {/* Zero-Config Callout Banner */}
-                    <div className="p-4 rounded-xl bg-gradient-to-r from-blue-50/80 via-indigo-50/60 to-purple-50/40 border border-blue-200/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                              revealedToken
-                                ? "bg-emerald-600 text-white"
-                                : "bg-blue-600 text-white"
-                            }`}
-                          >
-                            {revealedToken ? "Token Injected" : "Zero Config"}
-                          </span>
-                          <h3 className="text-xs font-bold text-slate-900">
-                            Give this prompt to any coding agent
-                          </h3>
-                        </div>
-                        <p className="text-[11px] text-slate-600 leading-relaxed max-w-2xl">
-                          Works in <strong>Cursor Composer</strong>, <strong>Claude Code CLI</strong>, <strong>Codex</strong>, or <strong>Google Antigravity</strong>. The agent detects your environment, creates the configuration, tests the tools, and automatically updates task status on your board.
-                        </p>
-                      </div>
-
-                      <Button
-                        size="sm"
-                        onClick={() => copyToClipboard(universalAgentPrompt)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5 shadow-xs rounded-xl px-4 h-9 font-medium shrink-0"
-                      >
-                        {copiedSnippet ? (
-                          <Check className="w-3.5 h-3.5 text-white" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                        <span>{copiedSnippet ? "Prompt Copied!" : "Copy Agent Prompt"}</span>
-                      </Button>
-                    </div>
-
-                    {/* Pre-formatted Prompt Box */}
-                    <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-inner">
-                      <div className="flex items-center justify-between px-3.5 py-2 bg-slate-900/90 border-b border-slate-800 text-[11px] text-slate-400">
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
-                          </div>
-                          <span className="font-mono text-slate-300 ml-1 font-semibold text-xs">agent-setup-prompt.md</span>
-                          <span className="text-[10px] text-slate-500">· Ready to paste</span>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => copyToClipboard(universalAgentPrompt)}
-                          className="h-6 text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 gap-1 px-2.5 rounded-md"
-                        >
-                          {copiedSnippet ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                          <span>{copiedSnippet ? "Copied" : "Copy"}</span>
-                        </Button>
-                      </div>
-                      <pre className="p-4 text-slate-100 font-mono text-[11.5px] leading-relaxed overflow-x-auto whitespace-pre-wrap select-all">
-                        {universalAgentPrompt}
-                      </pre>
-                    </div>
-
-                    {/* 3-Step Flow Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                      <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center">1</span>
-                          <h4 className="text-xs font-semibold text-slate-900">Copy Prompt</h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-relaxed">
-                          Click &ldquo;Copy Agent Prompt&rdquo; above. Your project key (<strong className="font-mono text-slate-700">{projectKey}</strong>) and token are embedded.
-                        </p>
-                      </div>
-                      <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center">2</span>
-                          <h4 className="text-xs font-semibold text-slate-900">Paste in Agent</h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-relaxed">
-                          Open Cursor Composer (<kbd className="font-mono text-[10px] bg-white px-1 py-0.5 rounded border border-slate-200">Ctrl+I</kbd>), Claude Code CLI, Codex, or Antigravity and paste.
-                        </p>
-                      </div>
-                      <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold text-[10px] flex items-center justify-center">3</span>
-                          <h4 className="text-xs font-semibold text-slate-900">Direct Board Sync</h4>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-relaxed">
-                          The agent verifies MCP tools and automatically transitions tasks to <strong className="text-emerald-700">DONE</strong> upon completion.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 2. MANUAL CURSOR CONFIG */}
-                {activeGuideTab === "cursor" && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs text-slate-600">
-                      <p>
-                        Paste into <strong className="font-mono text-slate-900">.cursor/mcp.json</strong> in your project repository or workspace root:
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => copyToClipboard(cursorConfigJson)}
-                        className="h-7 text-[11px] gap-1.5 border-slate-200"
-                      >
-                        {copiedSnippet ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                        <span>{copiedSnippet ? "Copied" : "Copy JSON"}</span>
-                      </Button>
-                    </div>
-                    <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto border border-slate-800 shadow-inner">
-                      {cursorConfigJson}
-                    </pre>
-                  </div>
-                )}
-
-                {/* 3. MANUAL CLAUDE CODE CLI */}
-                {activeGuideTab === "claude" && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs text-slate-600">
-                      <p>Run this command in your terminal inside your project:</p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => copyToClipboard(claudeCodeCommand)}
-                        className="h-7 text-[11px] gap-1.5 border-slate-200"
-                      >
-                        {copiedSnippet ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                        <span>{copiedSnippet ? "Copied" : "Copy Command"}</span>
-                      </Button>
-                    </div>
-                    <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto border border-slate-800 shadow-inner">
-                      {claudeCodeCommand}
-                    </pre>
-                  </div>
-                )}
-
-                {/* 4. MANUAL CODEX */}
-                {activeGuideTab === "codex" && (
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs text-slate-600">
-                        <p>Run CLI command in your project terminal:</p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => copyToClipboard(codexCommand)}
-                          className="h-7 text-[11px] gap-1.5 border-slate-200"
-                        >
-                          {copiedSnippet ? (
-                            <Check className="w-3 h-3 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>{copiedSnippet ? "Copied" : "Copy Command"}</span>
-                        </Button>
-                      </div>
-                      <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto border border-slate-800 shadow-inner">
-                        {codexCommand}
-                      </pre>
-                    </div>
-
-                    <div className="space-y-2 pt-2 border-t border-slate-100">
-                      <div className="flex items-center justify-between text-xs text-slate-600">
-                        <p>
-                          Or paste into <strong className="font-mono text-slate-900">.codex/mcp.json</strong>:
-                        </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => copyToClipboard(codexConfigJson)}
-                          className="h-7 text-[11px] gap-1.5 border-slate-200"
-                        >
-                          {copiedSnippet ? (
-                            <Check className="w-3 h-3 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>{copiedSnippet ? "Copied" : "Copy JSON"}</span>
-                        </Button>
-                      </div>
-                      <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto border border-slate-800 shadow-inner">
-                        {codexConfigJson}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-
-                {/* 5. MANUAL ANTIGRAVITY */}
-                {activeGuideTab === "antigravity" && (
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs text-slate-600">
-                        <p>Run with Antigravity CLI (<strong className="font-mono text-slate-900">agy</strong>):</p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => copyToClipboard(antigravityCommand)}
-                          className="h-7 text-[11px] gap-1.5 border-slate-200"
-                        >
-                          {copiedSnippet ? (
-                            <Check className="w-3 h-3 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>{copiedSnippet ? "Copied" : "Copy Command"}</span>
-                        </Button>
-                      </div>
-                      <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto border border-slate-800 shadow-inner">
-                        {antigravityCommand}
-                      </pre>
-                    </div>
-
-                    <div className="space-y-2 pt-2 border-t border-slate-100">
-                      <div className="flex items-center justify-between text-xs text-slate-600">
-                        <p>
-                          Or paste into <strong className="font-mono text-slate-900">~/.gemini/config/mcp_config.json</strong> (or <strong className="font-mono text-slate-900">.agents/mcp_config.json</strong>):
-                        </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => copyToClipboard(antigravityConfigJson)}
-                          className="h-7 text-[11px] gap-1.5 border-slate-200"
-                        >
-                          {copiedSnippet ? (
-                            <Check className="w-3 h-3 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>{copiedSnippet ? "Copied" : "Copy JSON"}</span>
-                        </Button>
-                      </div>
-                      <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] leading-relaxed overflow-x-auto border border-slate-800 shadow-inner">
-                        {antigravityConfigJson}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <McpConsole
+            logo={<McpIcon className="h-6 w-6" />}
+            projectKey={projectKey}
+            projectName={currentProject?.name || "AI Workspace"}
+            apiUrl={apiBaseUrl}
+            prompt={universalAgentPrompt}
+            tokens={apiKeys}
+            loadingTokens={loadingKeys}
+            tokensError={apiKeysError}
+            onBack={() => navigateToView("directory")}
+            onCreateToken={() => {
+              setRevealedToken(null);
+              setShowCreateKeyModal(true);
+            }}
+            onRevokeToken={setKeyToRevoke}
+            onReloadTokens={loadApiKeys}
+            onCopy={copyToClipboard}
+            editors={[
+              {
+                id: "cursor", name: "Cursor", icon: <CursorIcon className="h-4 w-4" />,
+                snippets: [{ id: "cursor-json", title: ".cursor/mcp.json", description: "Add this configuration to your project. Replace the backend path and access token before connecting.", code: cursorConfigJson, copyLabel: "Copy JSON" }],
+              },
+              {
+                id: "claude", name: "Claude Code", icon: <ClaudeIcon className="h-4 w-4" />,
+                snippets: [{ id: "claude-cli", title: "Terminal", description: "Replace the backend path and access token, then run this command in your project terminal.", code: claudeCodeCommand, copyLabel: "Copy command" }],
+              },
+              {
+                id: "codex", name: "Codex", icon: <CodexIcon className="h-4 w-4" />,
+                snippets: [
+                  { id: "codex-cli", title: "Terminal", description: "Replace the backend path and access token, then run this command in your project terminal.", code: codexCommand, copyLabel: "Copy command" },
+                  { id: "codex-toml", title: ".codex/config.toml", description: "Or use this config file. Set AI_WORKSPACE_API_KEY in your environment before starting Codex, and replace the backend path.", code: codexConfigToml, copyLabel: "Copy TOML" },
+                ],
+              },
+              {
+                id: "antigravity", name: "Antigravity", icon: <AntigravityIcon className="h-4 w-4" />,
+                snippets: [
+                  { id: "antigravity-cli", title: "Terminal", description: "Replace the backend path and access token, then run with the Antigravity CLI (agy).", code: antigravityCommand, copyLabel: "Copy command" },
+                  { id: "antigravity-json", title: "~/.gemini/config/mcp_config.json", description: "Or add this configuration to your config file or .agents/mcp_config.json. Replace the backend path and access token.", code: antigravityConfigJson, copyLabel: "Copy JSON" },
+                ],
+              },
+            ]}
+          />
         )}
 
         {/* ========================================================================= */}
         {/* VIEW 3: GITHUB ISSUES APP CONSOLE                                         */}
         {/* ========================================================================= */}
         {activeView === "github" && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            {/* Header & Breadcrumb with Back Navigation */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <button
-                  type="button"
-                  onClick={() => navigateToView("directory")}
-                  className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 font-medium transition-colors"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Back to Apps Directory</span>
-                </button>
-
-                <div className="flex items-center gap-2">
-                  {isGithubConnected ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                      Repository Connected
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                      Disconnected
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-xs">
-                    <GithubIcon className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
-                      GitHub Engineering Hub
-                    </h1>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Multi-repository synchronization for issues, pull requests, and codebase indexing into vector memory.
-                    </p>
-                  </div>
-                </div>
-
-                {isGithubConnected && (
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={syncing}
-                      onClick={handleSyncGithub}
-                      className="h-8 text-xs border-slate-200 hover:bg-slate-50 text-slate-700 gap-1.5 shadow-2xs font-medium"
-                      title="Sync Issues and Pull Requests"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
-                      <span>{syncing ? "Syncing..." : "Sync Issues & PRs"}</span>
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={syncingCode}
-                      onClick={handleSyncCodebase}
-                      className="h-8 text-xs border-blue-200 hover:bg-blue-50 text-blue-700 gap-1.5 shadow-2xs font-medium"
-                      title="Index codebase files into vector memory"
-                    >
-                      <Code2 className={`w-3.5 h-3.5 ${syncingCode ? "animate-spin text-blue-600" : "text-blue-600"}`} />
-                      <span>{syncingCode ? "Indexing Code..." : "Index Codebase"}</span>
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={disconnecting}
-                      onClick={() => setShowDisconnectConfirm(true)}
-                      className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 gap-1.5"
-                    >
-                      <Unlink className="w-3.5 h-3.5" />
-                      <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Multi-Repo Switcher Bar */}
-            {connections.length > 0 && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-                  <span className="text-xs font-semibold text-slate-500 whitespace-nowrap pl-1">
-                    Repositories:
-                  </span>
-                  {connections.map((c) => {
-                    const isSelected = c.id === activeConnection?.id;
-                    return (
-                      <button
-                        key={c.id}
-                        onClick={() => setSelectedConnectionId(c.id)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
-                          isSelected
-                            ? "bg-slate-900 text-white shadow-xs"
-                            : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 hover:border-slate-300"
-                        }`}
-                      >
-                        <GithubIcon className={`w-3.5 h-3.5 ${isSelected ? "text-white" : "text-slate-600"}`} />
-                        <span>{c.repositoryOwner}/{c.repositoryName}</span>
-                        <span
-                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-                            isSelected ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
-                          }`}
-                        >
-                          {c.issueCount ?? 0}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowConnectForm(!showConnectForm)}
-                  className="h-7 text-xs border-slate-200 hover:bg-white text-slate-700 gap-1.5 shrink-0 self-start sm:self-center"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Connect Another Repo</span>
-                </Button>
-              </div>
-            )}
-
-            {/* Connection Status or Connect Form */}
-            {loadingConnection ? (
-              <div className="h-36 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-            ) : showConnectForm || connections.length === 0 ? (
-              <div className="p-8 rounded-2xl border border-dashed border-slate-200 bg-white text-center space-y-4 shadow-xs">
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-white flex items-center justify-center mx-auto shadow-xs">
-                  <GithubIcon className="w-6 h-6" />
-                </div>
-                <div className="max-w-md mx-auto space-y-1.5">
-                  <h3 className="text-sm font-bold text-slate-900 font-serif">
-                    {connections.length > 0 ? "Connect Another Repository" : "Connect a GitHub Repository"}
-                  </h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Synchronize issues, pull requests, and codebase files from your GitHub repository into project vector memory.
-                  </p>
-                </div>
-
-                <form
-                  onSubmit={handleConnectGithub}
-                  className="max-w-md mx-auto p-5 rounded-2xl bg-slate-50 border border-slate-200 text-left space-y-3 animate-in fade-in"
-                >
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700">
-                      Repository Owner / Org *
-                    </label>
-                    <Input
-                      required
-                      value={owner}
-                      onChange={(e) => setOwner(e.target.value)}
-                      placeholder="e.g., facebook or your-username"
-                      className="h-8 text-xs bg-white"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700">
-                      Repository Name *
-                    </label>
-                    <Input
-                      required
-                      value={repo}
-                      onChange={(e) => setRepo(e.target.value)}
-                      placeholder="e.g., react or ai-workspace"
-                      className="h-8 text-xs bg-white"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-slate-700">
-                        Personal Access Token (Optional)
-                      </label>
-                      <span className="text-[10px] text-slate-400">For private repos</span>
-                    </div>
-                    <Input
-                      type="password"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      placeholder="ghp_... (leave empty for public repos)"
-                      className="h-8 text-xs bg-white font-mono"
-                    />
-                  </div>
-
-                  <div className="pt-2 flex justify-end gap-2">
-                    {connections.length > 0 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowConnectForm(false)}
-                        className="text-xs text-slate-600 hover:text-slate-900"
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={connecting}
-                      className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
-                    >
-                      {connecting ? "Connecting..." : "Confirm & Sync"}
-                    </Button>
-                  </div>
-                </form>
-              </div>
-            ) : isGithubConnected && (
-              <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl">
-                <CardHeader className="p-5 pb-3 border-b border-slate-100">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={`https://github.com/${activeConnection.repositoryOwner}/${activeConnection.repositoryName}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1.5 font-serif"
-                        >
-                          <span>
-                            {activeConnection.repositoryOwner}/{activeConnection.repositoryName}
-                          </span>
-                          <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-                        </a>
-                      </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono flex-wrap">
-                        <span>{activeConnection.issueCount ?? totalIssues} issues</span>
-                        <span>•</span>
-                        <span>{activeConnection.pullRequestCount ?? totalPrs} PRs</span>
-                        <span>•</span>
-                        <span>{activeConnection.fileCount ?? totalFiles} code files</span>
-                        <span>•</span>
-                        <span>
-                          Last sync:{" "}
-                          {activeConnection.lastSyncedAt
-                            ? formatDateTime(activeConnection.lastSyncedAt)
-                            : "Never"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CardContent className="p-5 pt-3">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Repository issues, pull requests, and codebase files are indexed into your knowledge base. When you chat with the AI Assistant or search, relevant GitHub records will be retrieved and cited as authorized project evidence.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Sub-Tabs: Issues | Pull Requests | Codebase Files */}
-            {isGithubConnected && (
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-                    <button
-                      onClick={() => setGithubSubTab("issues")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        githubSubTab === "issues"
-                          ? "bg-white text-slate-900 shadow-xs font-semibold"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      <Layers className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Issues ({totalIssues})</span>
-                    </button>
-
-                    <button
-                      onClick={() => setGithubSubTab("pulls")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        githubSubTab === "pulls"
-                          ? "bg-white text-slate-900 shadow-xs font-semibold"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      <GitPullRequest className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Pull Requests ({totalPrs})</span>
-                    </button>
-
-                    <button
-                      onClick={() => setGithubSubTab("code")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        githubSubTab === "code"
-                          ? "bg-white text-slate-900 shadow-xs font-semibold"
-                          : "text-slate-600 hover:text-slate-900"
-                      }`}
-                    >
-                      <Code2 className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Codebase ({totalFiles})</span>
-                    </button>
-                  </div>
-
-                  {/* Filter Toolbar for Active Tab */}
-                  <div className="flex items-center gap-2">
-                    {githubSubTab === "issues" && (
-                      <>
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
-                          <input
-                            value={issueSearchQuery}
-                            onChange={(e) => setIssueSearchQuery(e.target.value)}
-                            placeholder="Search issues..."
-                            className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
-                          />
-                        </div>
-
-                        <select
-                          value={selectedState}
-                          onChange={(e) => setSelectedState(e.target.value)}
-                          className="h-7 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs cursor-pointer"
-                        >
-                          <option value="all">All States</option>
-                          <option value="open">Open</option>
-                          <option value="closed">Closed</option>
-                        </select>
-                      </>
-                    )}
-
-                    {githubSubTab === "pulls" && (
-                      <>
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
-                          <input
-                            value={prSearchQuery}
-                            onChange={(e) => setPrSearchQuery(e.target.value)}
-                            placeholder="Search PRs..."
-                            className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
-                          />
-                        </div>
-
-                        <select
-                          value={prState}
-                          onChange={(e) => setPrState(e.target.value)}
-                          className="h-7 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-codex-accent shadow-2xs cursor-pointer"
-                        >
-                          <option value="all">All States</option>
-                          <option value="open">Open</option>
-                          <option value="closed">Closed</option>
-                        </select>
-                      </>
-                    )}
-
-                    {githubSubTab === "code" && (
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
-                        <input
-                          value={fileSearchQuery}
-                          onChange={(e) => setFileSearchQuery(e.target.value)}
-                          placeholder="Search files..."
-                          className="pl-8 h-7 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-codex-accent w-44 sm:w-56 shadow-2xs"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* TAB 1: ISSUES */}
-                {githubSubTab === "issues" && (
-                  <div>
-                    {loadingIssues ? (
-                      <div className="space-y-3">
-                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                      </div>
-                    ) : issues.length === 0 ? (
-                      <div className="text-center py-12 p-6 rounded-2xl border border-dashed border-slate-200 bg-white space-y-2">
-                        <p className="text-xs text-slate-500">
-                          No issues found matching your search or state filter.
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setIssueSearchQuery("");
-                            setSelectedState("all");
-                          }}
-                          className="text-xs"
-                        >
-                          Clear Filters
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {issues.map((issue) => {
-                          const isExpanded = expandedIssues[issue.id];
-                          const isOpen = issue.state === "open";
-                          return (
-                            <Card
-                              key={issue.id}
-                              className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md rounded-2xl"
-                            >
-                              <div className="p-4">
-                                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                                  <div className="flex items-start gap-2.5">
-                                    <span className="pt-0.5">
-                                      {isOpen ? (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
-                                          OPEN
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                                          CLOSED
-                                        </span>
-                                      )}
-                                    </span>
-
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="font-mono text-xs font-bold text-slate-400">
-                                          #{issue.issueNumber}
-                                        </span>
-                                        <a
-                                          href={issue.htmlUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="text-xs font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1 font-serif"
-                                        >
-                                          <span>{issue.title}</span>
-                                          <ExternalLink className="w-3 h-3 text-slate-400" />
-                                        </a>
-                                      </div>
-
-                                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
-                                        {issue.authorLogin && (
-                                          <span className="flex items-center gap-1">
-                                            <User className="w-3 h-3 text-slate-400" />
-                                            <span>{issue.authorLogin}</span>
-                                          </span>
-                                        )}
-                                        <span className="flex items-center gap-1">
-                                          <Clock className="w-3 h-3 text-slate-400" />
-                                          <span>Updated {formatDate(issue.githubUpdatedAt)}</span>
-                                        </span>
-                                      </div>
-
-                                      {issue.labels && issue.labels.length > 0 && (
-                                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                                          {issue.labels.map((label: string, idx: number) => (
-                                            <span
-                                              key={idx}
-                                              className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600"
-                                            >
-                                              {label}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 flex-wrap">
-                                    <Link
-                                      href={`/tasks?create=true&title=${encodeURIComponent(
-                                        `[GH-#${issue.issueNumber}] ${issue.title}`
-                                      )}`}
-                                    >
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
-                                        title="Create workspace task from this GitHub issue"
-                                      >
-                                        <CheckSquare className="w-3 h-3 text-[#2D8A60]" />
-                                        <span>Create Task</span>
-                                      </Button>
-                                    </Link>
-                                    <Link
-                                      href={`/assistant?prompt=${encodeURIComponent(
-                                        `Analyze GitHub issue #${issue.issueNumber}: "${issue.title}". Body: "${
-                                          issue.body || "No description"
-                                        }". How should we implement and test this?`
-                                      )}&mode=DEVELOPER`}
-                                    >
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
-                                        title="Ask Copilot about this issue"
-                                      >
-                                        <Bot className="w-3 h-3 text-codex-accent" />
-                                        <span className="hidden md:inline">Ask Copilot</span>
-                                      </Button>
-                                    </Link>
-                                    {issue.body && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setExpandedIssues((prev) => ({
-                                            ...prev,
-                                            [issue.id]: !prev[issue.id],
-                                          }));
-                                        }}
-                                        className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 shrink-0 gap-1 px-2.5 shadow-2xs"
-                                      >
-                                        <span>{isExpanded ? "Hide Body" : "View Body"}</span>
-                                        {isExpanded ? (
-                                          <ChevronUp className="w-3 h-3" />
-                                        ) : (
-                                          <ChevronDown className="w-3 h-3" />
-                                        )}
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {isExpanded && issue.body && (
-                                  <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed animate-in fade-in">
-                                    {issue.body}
-                                  </div>
-                                )}
-                              </div>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 2: PULL REQUESTS */}
-                {githubSubTab === "pulls" && (
-                  <div>
-                    {loadingPrs ? (
-                      <div className="space-y-3">
-                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                      </div>
-                    ) : pullRequests.length === 0 ? (
-                      <div className="text-center py-12 p-6 rounded-2xl border border-dashed border-slate-200 bg-white space-y-2">
-                        <p className="text-xs text-slate-500">
-                          No pull requests found matching your filter.
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setPrSearchQuery("");
-                            setPrState("all");
-                          }}
-                          className="text-xs"
-                        >
-                          Clear Filters
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {pullRequests.map((pr) => {
-                          const isMerged = pr.isMerged;
-                          const isOpen = pr.state === "open";
-                          return (
-                            <Card
-                              key={pr.id}
-                              className="bg-white border border-slate-200 hover:border-slate-300 transition-all shadow-xs hover:shadow-md rounded-2xl"
-                            >
-                              <div className="p-4">
-                                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                                  <div className="flex items-start gap-2.5">
-                                    <span className="pt-0.5">
-                                      {isMerged ? (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                                          MERGED
-                                        </span>
-                                      ) : isOpen ? (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8F5E9] text-[#2D8A60] border border-green-200">
-                                          OPEN
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                                          CLOSED
-                                        </span>
-                                      )}
-                                    </span>
-
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="font-mono text-xs font-bold text-slate-400">
-                                          #{pr.prNumber}
-                                        </span>
-                                        <a
-                                          href={pr.htmlUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="text-xs font-bold text-slate-900 hover:text-codex-accent transition-colors flex items-center gap-1 font-serif"
-                                        >
-                                          <span>{pr.title}</span>
-                                          <ExternalLink className="w-3 h-3 text-slate-400" />
-                                        </a>
-                                      </div>
-
-                                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono flex-wrap">
-                                        {pr.headBranch && pr.baseBranch && (
-                                          <span className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded text-slate-600">
-                                            <GitBranch className="w-3 h-3 text-slate-500" />
-                                            <span>{pr.headBranch}</span>
-                                            <span>→</span>
-                                            <span>{pr.baseBranch}</span>
-                                          </span>
-                                        )}
-                                        {pr.authorLogin && (
-                                          <span className="flex items-center gap-1">
-                                            <User className="w-3 h-3 text-slate-400" />
-                                            <span>{pr.authorLogin}</span>
-                                          </span>
-                                        )}
-                                        <span className="flex items-center gap-1">
-                                          <Clock className="w-3 h-3 text-slate-400" />
-                                          <span>Updated {formatDate(pr.githubUpdatedAt)}</span>
-                                        </span>
-                                      </div>
-
-                                      {pr.labels && pr.labels.length > 0 && (
-                                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                                          {pr.labels.map((label: string, idx: number) => (
-                                            <span
-                                              key={idx}
-                                              className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600"
-                                            >
-                                              {label}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5 self-end sm:self-start shrink-0 flex-wrap">
-                                    <Link
-                                      href={`/assistant?prompt=${encodeURIComponent(
-                                        `Review pull request #${pr.prNumber}: "${pr.title}". Branches: ${pr.headBranch} -> ${pr.baseBranch}. Description: "${
-                                          pr.body || "No description provided"
-                                        }". What are the key architectural changes and testing checklist?`
-                                      )}&mode=DEVELOPER`}
-                                    >
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
-                                        title="Ask Copilot to review this PR"
-                                      >
-                                        <Bot className="w-3 h-3 text-codex-accent" />
-                                        <span>Ask Copilot</span>
-                                      </Button>
-                                    </Link>
-                                    <a href={pr.htmlUrl} target="_blank" rel="noreferrer">
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2.5 font-medium shadow-2xs"
-                                      >
-                                        <ExternalLink className="w-3 h-3" />
-                                        <span>View on GitHub</span>
-                                      </Button>
-                                    </a>
-                                  </div>
-                                </div>
-
-                                {pr.body && (
-                                  <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed">
-                                    {pr.body}
-                                  </div>
-                                )}
-                              </div>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* TAB 3: CODEBASE INDEX */}
-                {githubSubTab === "code" && (
-                  <div>
-                    {loadingFiles ? (
-                      <div className="space-y-3">
-                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                        <div className="h-20 rounded-2xl bg-white border border-slate-200 animate-pulse" />
-                      </div>
-                    ) : repoFiles.length === 0 ? (
-                      <div className="text-center py-12 p-8 rounded-2xl border border-dashed border-slate-200 bg-white space-y-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
-                          <Code2 className="w-5 h-5" />
-                        </div>
-                        <div className="max-w-md mx-auto space-y-1">
-                          <h4 className="text-sm font-bold text-slate-900 font-serif">
-                            No Codebase Files Indexed Yet
-                          </h4>
-                          <p className="text-xs text-slate-500">
-                            Index repository source files into vector memory so the AI Copilot can answer technical questions and reference implementation code.
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          disabled={syncingCode}
-                          onClick={handleSyncCodebase}
-                          className="bg-codex-accent hover:bg-codex-hover text-white text-xs gap-1.5 shadow-xs"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${syncingCode ? "animate-spin" : ""}`} />
-                          <span>{syncingCode ? "Indexing Codebase..." : "Index Codebase Now"}</span>
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs text-slate-500 px-1 pb-1">
-                          <span>Showing {repoFiles.length} indexed files</span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={syncingCode}
-                            onClick={handleSyncCodebase}
-                            className="h-6 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 p-1"
-                          >
-                            <RefreshCw className={`w-3 h-3 ${syncingCode ? "animate-spin" : ""}`} />
-                            <span>Re-index</span>
-                          </Button>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-2">
-                          {repoFiles.map((file) => (
-                            <div
-                              key={file.id}
-                              className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl transition-all shadow-2xs flex items-center justify-between gap-3"
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 rounded-lg bg-slate-50 text-slate-600 flex items-center justify-center shrink-0 border border-slate-200">
-                                  <FileCode className="w-4 h-4 text-blue-600" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-mono font-medium text-slate-900 truncate">
-                                      {file.path}
-                                    </span>
-                                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
-                                      {file.extension}
-                                    </span>
-                                  </div>
-                                  <span className="text-[10px] text-slate-400 font-mono">
-                                    {(file.size / 1024).toFixed(1)} KB • Indexed in pgvector
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <Link
-                                  href={`/assistant?prompt=${encodeURIComponent(
-                                    `Explain the file "${file.path}" from repository ${activeConnection.repositoryOwner}/${activeConnection.repositoryName}. What does it do and how is it used in the architecture?`
-                                  )}&mode=DEVELOPER`}
-                                >
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-[11px] text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 gap-1 px-2.5 shadow-2xs"
-                                    title="Ask Copilot about this file"
-                                  >
-                                    <Bot className="w-3 h-3 text-codex-accent" />
-                                    <span className="hidden sm:inline">Ask Copilot</span>
-                                  </Button>
-                                </Link>
-
-                                <a href={file.htmlUrl} target="_blank" rel="noreferrer">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-[11px] border-slate-200 text-slate-700 hover:bg-slate-50 gap-1 px-2 shadow-2xs"
-                                    title="Open file on GitHub"
-                                  >
-                                    <ExternalLink className="w-3 h-3" />
-                                  </Button>
-                                </a>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <GitHubWorkspace
+            connections={connections} activeConnection={activeConnection} loadingConnection={loadingConnection}
+            onSelectConnection={id => { setSelectedConnectionId(id); setFileSearchQuery(""); setIssueSearchQuery(""); setPrSearchQuery(""); }} onBack={() => setActiveView("directory")}
+            showConnectForm={showConnectForm} onToggleConnect={() => setShowConnectForm(v => !v)} connecting={connecting}
+            connectForm={{ url: repositoryUrl, error: repositoryUrlError, token, setUrl: value => { setRepositoryUrl(value); setRepositoryUrlError(null); }, setToken, onSubmit: handleConnectGithub }}
+            files={repoFiles} loadingFiles={loadingFiles} totalFiles={totalFiles}
+            loadErrors={githubLoadErrors} onRetry={view => {
+              if (!activeRepositoryId) return;
+              if (view === "code") loadFiles(activeRepositoryId);
+              else if (view === "issues") loadIssues(activeRepositoryId);
+              else loadPullRequests(activeRepositoryId);
+            }}
+            fileQuery={fileSearchQuery} onFileQueryChange={setFileSearchQuery}
+            issues={issues} totalIssues={totalIssues} loadingIssues={loadingIssues}
+            issueQuery={issueSearchQuery} onIssueQueryChange={setIssueSearchQuery} issueState={selectedState} onIssueStateChange={setSelectedState}
+            pullRequests={pullRequests} totalPrs={totalPrs} loadingPrs={loadingPrs}
+            prQuery={prSearchQuery} onPrQueryChange={setPrSearchQuery} prState={prState} onPrStateChange={setPrState}
+            syncing={syncing} syncingCode={syncingCode} indexProgress={indexProgress}
+            onSync={handleSyncGithub} onIndex={handleSyncCodebase}
+            onDisconnect={() => setShowDisconnectConfirm(true)} disconnecting={disconnecting}
+            syncToken={syncAccessToken} onSyncTokenChange={setSyncAccessToken}
+          />
         )}
       </div>
 
@@ -2126,7 +955,7 @@ export default function IntegrationsPage() {
       {/* ========================================================================= */}
       {showCreateKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="mcp-token-dialog-title" className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4">
             {!revealedToken ? (
               <form onSubmit={handleCreateApiKey} className="space-y-4">
                 <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
@@ -2134,32 +963,35 @@ export default function IntegrationsPage() {
                     <Key className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900 font-serif">
-                      Generate Personal Access Token
+                    <h3 id="mcp-token-dialog-title" className="text-base font-semibold text-slate-900">
+                      Create access token
                     </h3>
                     <p className="text-[11px] text-slate-500">
-                      For Claude Code CLI, Cursor, or Windsurf.
+                      Connect an agent with your workspace permissions.
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Token Name *</label>
+                  <label htmlFor="mcp-token-name" className="text-xs font-medium text-slate-700">Token name</label>
                   <Input
+                    id="mcp-token-name"
+                    autoFocus
                     required
                     placeholder="e.g. Claude Code CLI, Cursor MacBook"
                     value={newKeyName}
                     onChange={(e) => setNewKeyName(e.target.value)}
-                    className="h-8 text-xs bg-slate-50 border-slate-200"
+                    className="h-10 text-sm bg-white border-slate-200"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-700">Expiration</label>
+                  <label htmlFor="mcp-token-expiration" className="text-xs font-medium text-slate-700">Expiration</label>
                   <select
+                    id="mcp-token-expiration"
                     value={newKeyExpiryDays}
                     onChange={(e) => setNewKeyExpiryDays(parseInt(e.target.value, 10))}
-                    className="w-full h-8 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+                    className="w-full h-10 rounded-lg bg-white border border-slate-200 px-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
                   >
                     <option value={30}>30 Days</option>
                     <option value={60}>60 Days</option>
@@ -2182,7 +1014,8 @@ export default function IntegrationsPage() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setShowCreateKeyModal(false)}
-                    className="text-xs text-slate-600"
+                    disabled={creatingKey}
+                    className="h-10 text-xs text-slate-600"
                   >
                     Cancel
                   </Button>
@@ -2190,9 +1023,9 @@ export default function IntegrationsPage() {
                     type="submit"
                     size="sm"
                     disabled={creatingKey || !newKeyName.trim()}
-                    className="bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
+                    className="h-10 bg-codex-accent hover:bg-codex-hover text-white text-xs px-4"
                   >
-                    {creatingKey ? "Creating..." : "Generate Token"}
+                    {creatingKey ? "Creating..." : "Create token"}
                   </Button>
                 </div>
               </form>
@@ -2204,8 +1037,8 @@ export default function IntegrationsPage() {
                     <CheckCircle2 className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900 font-serif">
-                      Token Generated Successfully!
+                    <h3 id="mcp-token-dialog-title" className="text-base font-semibold text-slate-900">
+                      Token created
                     </h3>
                     <p className="text-[11px] text-slate-500">
                       Copy and store this token now. It will not be shown again.
