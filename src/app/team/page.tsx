@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   X,
   ShieldAlert,
+  ChevronDown,
 } from "lucide-react";
 import { CustomDropdown, type CustomDropdownOption } from "@/components/ui/custom-dropdown";
 import { FilterDropdown, type FilterOption } from "@/components/ui/filter-dropdown";
@@ -150,6 +151,16 @@ export default function TeamPage() {
   >("DEVELOPER");
   const [inviting, setInviting] = useState(false);
   const [recentInviteLinks, setRecentInviteLinks] = useState<Array<{ email: string; link: string }>>([]);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  useEffect(() => {
+    if (!showInviteForm) return;
+    const frame = requestAnimationFrame(() => {
+      const form = document.getElementById("team-invite-form");
+      form?.scrollIntoView({ behavior: "smooth", block: "center" });
+      form?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showInviteForm]);
 
   // Filter and search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -358,7 +369,7 @@ export default function TeamPage() {
     <AppLayout>
       <div className="space-y-6 max-w-7xl mx-auto pb-12">
         {/* Breadcrumb & Header */}
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1.5">
               <Link href="/dashboard" className="text-[#2563eb] hover:underline font-medium">
@@ -368,32 +379,235 @@ export default function TeamPage() {
               <span className="text-slate-800 font-medium">Team</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-serif">
-              Team & Workspace Members
+              Team
             </h1>
             <p className="text-xs text-slate-500 mt-1">
-              Manage workspace members, assign roles, and invite new colleagues to collaborate.
+              The people in your workspace, their roles, and invitations.
             </p>
           </div>
+          <button type="button" aria-expanded={showInviteForm} aria-controls="team-invite-form"
+            onClick={() => setShowInviteForm((open) => !open)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-codex-accent px-4 text-xs font-semibold text-white hover:bg-codex-hover transition-colors">
+            <UserPlus className="h-4 w-4" /> Invite people
+          </button>
         </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Members", value: members.length, icon: Users, color: "text-blue-600 bg-blue-50" },
+            { label: "Active", value: members.filter((member) => member.isActive).length, icon: CheckCircle2, color: "text-emerald-600 bg-emerald-50" },
+            { label: "Pending invites", value: pendingInvites.length, icon: Clock, color: "text-amber-600 bg-amber-50" },
+          ].map((stat) => (
+            <div key={stat.label} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+              <span className={`hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${stat.color}`}><stat.icon className="h-4 w-4" /></span>
+              <div><p className="text-xs text-slate-500">{stat.label}</p><p className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{loading ? "—" : stat.value}</p></div>
+            </div>
+          ))}
+        </div>
+        {/* Filter and Members Table */}
+        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-2xs">
+          {/* Header & Filter Toolbar */}
+          <div className="p-5 border-b border-slate-200 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold font-serif text-slate-900">
+                Members <span className="ml-1.5 rounded-md bg-slate-100 px-2 py-0.5 font-sans text-xs font-medium text-slate-600">{members.length}</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Search by name or email, or filter by role and access.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+              {/* Role Filter */}
+              <FilterDropdown
+                label="Role"
+                allLabel="All roles"
+                value={selectedRoleFilter}
+                onChange={setSelectedRoleFilter}
+                options={FILTER_ROLE_OPTIONS}
+              />
+
+              {/* Access Filter */}
+              <FilterDropdown
+                label="Access"
+                allLabel="All access"
+                value={selectedAccessFilter}
+                onChange={setSelectedAccessFilter}
+                options={FILTER_ACCESS_OPTIONS}
+              />
+
+              {/* Search input */}
+              <div className="relative w-full min-w-0 sm:w-56 sm:flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                <input
+                  type="text"
+                  aria-label="Search members"
+                  placeholder="Filter members..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
+                />
+                {searchQuery && (
+                  <button
+                    aria-label="Clear member search"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Members Table */}
+          {loading ? (
+            <div className="p-12 text-center text-xs text-slate-400">Loading workspace team members...</div>
+          ) : filteredMembers.length === 0 ? (
+            <div className="text-center py-16 p-8 space-y-3">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
+                <Users className="w-6 h-6 stroke-[1.8]" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-900">No members match your criteria</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                {members.length === 0
+                  ? "No team members found in this workspace."
+                  : "Try adjusting your role or access filters, or clear your search query."}
+              </p>
+              {(selectedRoleFilter !== "ALL" || selectedAccessFilter !== "ALL" || searchQuery) && (
+                <button
+                  onClick={() => {
+                    setSelectedRoleFilter("ALL");
+                    setSelectedAccessFilter("ALL");
+                    setSearchQuery("");
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-2xs cursor-pointer transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear filters</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-xs">
+                <thead className="bg-slate-50/70 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
+                  <tr>
+                    <th className="px-5 py-3">Member</th>
+                    <th className="px-4 py-3">Professional Role</th>
+                    <th className="px-4 py-3">System Access</th>
+                    <th className="px-4 py-3">Joined Date</th>
+                    <th className="px-4 py-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredMembers.map((member) => {
+                    const isSelf = member.id === currentUser?.id;
+                    const initials = getInitials(member.displayName, member.email);
+                    const avatarBg = getMemberAvatarBg(member.professionalRole);
+                    const profBadgeStyle = getProfRoleBadgeStyle(member.professionalRole);
+                    const profRoleLabel = getProfRoleLabel(member.professionalRole);
+
+                    return (
+                      <tr key={member.id} className="hover:bg-slate-50/60 transition-colors">
+                        {/* Member Name + Avatar */}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-8 h-8 rounded-full ${avatarBg} text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-2xs`}
+                            >
+                              {initials}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-900 truncate">
+                                {member.displayName || "Workspace Member"}
+                              </span>
+                              {isSelf && (
+                                <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-200/60">
+                                  You
+                                </span>
+                              )}
+                              </div>
+                              <p className="mt-0.5 text-[11px] text-slate-500">{member.email}</p>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Professional Role Badge */}
+                        <td className="px-4 py-3.5">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-medium border ${profBadgeStyle}`}
+                          >
+                            {profRoleLabel}
+                          </span>
+                        </td>
+
+                        {/* System Access Badge */}
+                        <td className="px-4 py-3.5">
+                          {member.systemRole === "ADMIN" ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/80">
+                              <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Admin</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
+                              <Shield className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Member</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Joined Date */}
+                        <td className="px-4 py-3.5 text-slate-500 font-normal">
+                          {member.createdAt
+                            ? new Date(member.createdAt).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "-"}
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-3.5 text-right">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium border ${member.isActive ? "bg-emerald-50 text-emerald-700 border-emerald-200/80" : "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${member.isActive ? "bg-emerald-500" : "bg-slate-400"}`} />
+                            <span>{member.isActive ? "Active" : "Inactive"}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!loading && <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">Showing {filteredMembers.length} of {members.length} members</div>}
+        </section>
+
         {/* Inline Invite Box */}
         <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className={`flex items-center justify-between gap-3 ${showInviteForm ? "border-b border-slate-100 pb-4" : ""}`}>
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center shrink-0">
                 <UserPlus className="w-4 h-4 stroke-[2.2]" />
               </div>
               <div>
                 <h2 className="text-base font-bold font-serif text-slate-900 flex items-center gap-2">
-                  <span>Invite Colleagues to Workspace</span>
+                  <span>Invite people</span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Send direct invitation links. Colleagues set their password to join your workspace immediately.
+                  Create a link to share with a new colleague.
                 </p>
               </div>
             </div>
+            <button type="button" aria-expanded={showInviteForm} aria-controls="team-invite-form" aria-label={showInviteForm ? "Collapse invitations" : "Expand invitations"}
+              onClick={() => setShowInviteForm((open) => !open)} className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100">
+              <ChevronDown className={`h-4 w-4 transition-transform ${showInviteForm ? "rotate-180" : ""}`} />
+            </button>
           </div>
 
-          <form onSubmit={handleSendInvites} className="space-y-4">
+          <form id="team-invite-form" onSubmit={handleSendInvites} hidden={!showInviteForm} className="space-y-4">
             <div className="flex flex-col lg:flex-row items-stretch lg:items-start gap-3">
               {/* Chip Input Container */}
               <div className="flex-1">
@@ -416,6 +630,7 @@ export default function TeamPage() {
                   ))}
                   <input
                     type="text"
+                    aria-label="Email addresses to invite"
                     value={emailInput}
                     onChange={(e) => {
                       setEmailInput(e.target.value);
@@ -522,188 +737,6 @@ export default function TeamPage() {
           </form>
         </section>
 
-        {/* Filter and Members Table */}
-        <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-2xs">
-          {/* Header & Filter Toolbar */}
-          <div className="p-5 border-b border-slate-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold font-serif text-slate-900">
-                Workspace Members ({members.length})
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                All team members with access to workspace projects and resources.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Role Filter */}
-              <FilterDropdown
-                label="Role"
-                allLabel="All roles"
-                value={selectedRoleFilter}
-                onChange={setSelectedRoleFilter}
-                options={FILTER_ROLE_OPTIONS}
-              />
-
-              {/* Access Filter */}
-              <FilterDropdown
-                label="Access"
-                allLabel="All access"
-                value={selectedAccessFilter}
-                onChange={setSelectedAccessFilter}
-                options={FILTER_ACCESS_OPTIONS}
-              />
-
-              {/* Search input */}
-              <div className="relative flex-1 md:w-56">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Filter members..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 h-9"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Members Table */}
-          {loading ? (
-            <div className="p-12 text-center text-xs text-slate-400">Loading workspace team members...</div>
-          ) : filteredMembers.length === 0 ? (
-            <div className="text-center py-16 p-8 space-y-3">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto border border-slate-200">
-                <Users className="w-6 h-6 stroke-[1.8]" />
-              </div>
-              <h3 className="text-sm font-semibold text-slate-900">No members match your criteria</h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                {members.length === 0
-                  ? "No team members found in this workspace."
-                  : "Try adjusting your role or access filters, or clear your search query."}
-              </p>
-              {(selectedRoleFilter !== "ALL" || selectedAccessFilter !== "ALL" || searchQuery) && (
-                <button
-                  onClick={() => {
-                    setSelectedRoleFilter("ALL");
-                    setSelectedAccessFilter("ALL");
-                    setSearchQuery("");
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 shadow-2xs cursor-pointer transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Clear filters</span>
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50/70 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
-                  <tr>
-                    <th className="px-5 py-3">Member</th>
-                    <th className="px-4 py-3">Email</th>
-                    <th className="px-4 py-3">Professional Role</th>
-                    <th className="px-4 py-3">System Access</th>
-                    <th className="px-4 py-3">Joined Date</th>
-                    <th className="px-4 py-3 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredMembers.map((member) => {
-                    const isSelf = member.id === currentUser?.id;
-                    const initials = getInitials(member.displayName, member.email);
-                    const avatarBg = getMemberAvatarBg(member.professionalRole);
-                    const profBadgeStyle = getProfRoleBadgeStyle(member.professionalRole);
-                    const profRoleLabel = getProfRoleLabel(member.professionalRole);
-
-                    return (
-                      <tr key={member.id} className="hover:bg-slate-50/60 transition-colors">
-                        {/* Member Name + Avatar */}
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`w-8 h-8 rounded-full ${avatarBg} text-white font-bold text-[11px] flex items-center justify-center shrink-0 shadow-2xs`}
-                            >
-                              {initials}
-                            </div>
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="font-semibold text-slate-900 truncate">
-                                {member.displayName || "Workspace Member"}
-                              </span>
-                              {isSelf && (
-                                <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-200/60">
-                                  You
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Email */}
-                        <td className="px-4 py-3.5 text-slate-600 font-mono text-[11px]">
-                          {member.email}
-                        </td>
-
-                        {/* Professional Role Badge */}
-                        <td className="px-4 py-3.5">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-medium border ${profBadgeStyle}`}
-                          >
-                            {profRoleLabel}
-                          </span>
-                        </td>
-
-                        {/* System Access Badge */}
-                        <td className="px-4 py-3.5">
-                          {member.systemRole === "ADMIN" ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/80">
-                              <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                              <span>Admin</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
-                              <Shield className="w-3.5 h-3.5 text-slate-400" />
-                              <span>Member</span>
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Joined Date */}
-                        <td className="px-4 py-3.5 text-slate-500 font-normal">
-                          {member.createdAt
-                            ? new Date(member.createdAt).toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })
-                            : "-"}
-                        </td>
-
-                        {/* Status */}
-                        <td className="px-4 py-3.5 text-right">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/80">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            <span>Active</span>
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
         {/* Pending Invitations Table */}
         <section className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-2xs">
           <div className="p-5 border-b border-slate-200 flex items-center justify-between">
@@ -796,47 +829,6 @@ export default function TeamPage() {
               </table>
             </div>
           )}
-        </section>
-
-        {/* Roles & Permissions Reference Card */}
-        <section className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-indigo-600" />
-            <h2 className="text-base font-bold font-serif text-slate-900">
-              Workspace Roles & Access Capabilities
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2">
-              <div className="flex items-center gap-2 font-bold text-slate-900">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                <span>System Administrator</span>
-              </div>
-              <p className="text-slate-600 leading-relaxed">
-                Full administrative access. Manages workspace configuration, invites members, assigns permissions, monitors audit trails, and archives projects.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2">
-              <div className="flex items-center gap-2 font-bold text-slate-900">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
-                <span>Product / Engineer (Member)</span>
-              </div>
-              <p className="text-slate-600 leading-relaxed">
-                Collaborates across active workspace projects. Can author requirements, track tasks, upload documents, record decisions, and utilize AI Copilot.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2">
-              <div className="flex items-center gap-2 font-bold text-slate-900">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                <span>DevOps & Infrastructure</span>
-              </div>
-              <p className="text-slate-600 leading-relaxed">
-                Manages repository connections, GitHub issue sync, CI/CD integrations, deployment pipelines, and document ingestion sources.
-              </p>
-            </div>
-          </div>
         </section>
 
         {/* CANCEL INVITATION CONFIRMATION MODAL */}

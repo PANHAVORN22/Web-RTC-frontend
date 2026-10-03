@@ -24,8 +24,11 @@ export interface DropdownSelectProps {
   prefix?: string; // e.g. "Project:"
   className?: string;
   triggerClassName?: string;
+  triggerPrefixIcon?: React.ReactNode;
+  triggerTextClassName?: string;
   menuWidth?: string;
   align?: "left" | "right";
+  direction?: "up" | "down";
   disabled?: boolean;
 }
 
@@ -37,8 +40,11 @@ export const DropdownSelect: React.FC<DropdownSelectProps> = ({
   prefix,
   className = "",
   triggerClassName = "",
+  triggerPrefixIcon,
+  triggerTextClassName,
   menuWidth = "min-w-[210px] w-full sm:w-auto",
   align = "left",
+  direction = "down",
   disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -89,14 +95,17 @@ export const DropdownSelect: React.FC<DropdownSelectProps> = ({
         } ${triggerClassName}`}
       >
         <div className="flex items-center gap-2 truncate min-w-0 pr-1">
-          {selectedOption?.avatar && (
+          {triggerPrefixIcon && (
+            <span className="shrink-0">{triggerPrefixIcon}</span>
+          )}
+          {!triggerPrefixIcon && selectedOption?.avatar && (
             <div
               className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${selectedOption.avatar.colorClass}`}
             >
               {selectedOption.avatar.initials}
             </div>
           )}
-          {selectedOption?.icon && (
+          {!triggerPrefixIcon && selectedOption?.icon && (
             <span className="shrink-0 text-slate-500">{selectedOption.icon}</span>
           )}
           {selectedOption?.badge && (
@@ -110,7 +119,7 @@ export const DropdownSelect: React.FC<DropdownSelectProps> = ({
           )}
           <span className="truncate">
             {prefix && <span className="text-slate-500 font-normal mr-1">{prefix}</span>}
-            <span className="font-semibold text-slate-800">
+            <span className={triggerTextClassName || "font-semibold text-slate-800"}>
               {selectedOption ? selectedOption.label : placeholder}
             </span>
           </span>
@@ -129,7 +138,9 @@ export const DropdownSelect: React.FC<DropdownSelectProps> = ({
           role="listbox"
           className={`absolute ${
             align === "right" ? "right-0" : "left-0"
-          } top-full mt-1.5 ${menuWidth} max-h-72 overflow-y-auto bg-white rounded-2xl shadow-xl shadow-slate-900/10 border border-slate-200/90 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 [scrollbar-width:thin] [scrollbar-color:rgba(0,0,0,0.12)_transparent]`}
+          } ${
+            direction === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-1.5 origin-top"
+          } ${menuWidth} max-h-72 overflow-y-auto bg-white rounded-2xl shadow-xl shadow-slate-900/10 border border-slate-200/90 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 [scrollbar-width:thin] [scrollbar-color:rgba(0,0,0,0.12)_transparent]`}
         >
           <div className="space-y-0.5">
             {options.map((opt) => {

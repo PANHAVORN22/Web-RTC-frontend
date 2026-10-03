@@ -510,7 +510,6 @@ export default function ProjectDetailPage() {
   const projectOwnerMember = useMemo(() => {
     return (
       members.find((m) => m.accessRole === "OWNER") ||
-      members[0] ||
       null
     );
   }, [members]);
@@ -518,12 +517,12 @@ export default function ProjectDetailPage() {
   const projectLeadName = useMemo(() => {
     if (projectOwnerMember) {
       const u = projectOwnerMember.user || projectOwnerMember;
-      return u?.displayName || u?.email || "Project Lead";
+      return u?.displayName || u?.email || "Not assigned";
     }
     if (projectData?.owner) {
-      return projectData.owner.displayName || projectData.owner.email || "Project Lead";
+      return projectData.owner.displayName || projectData.owner.email || "Not assigned";
     }
-    return "Project Lead";
+    return "Not assigned";
   }, [projectOwnerMember, projectData]);
 
   // Real document upload
@@ -659,7 +658,7 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const projectName = projectData?.name || "AI Project Workspace";
+  const projectName = projectData?.name || "Unknown project";
   const projectKey = projectData?.key || "AIW";
 
   const copyToClipboard = (text: string, label: string) => {
@@ -740,7 +739,7 @@ export default function ProjectDetailPage() {
               )}
             </div>
             <p className="text-xs text-slate-500">
-              {projectData?.description || "Centralized workspace for project requirements, tasks, documents, and AI-grounded insights"}
+              {projectData?.description || "No description provided."}
             </p>
           </div>
 
@@ -908,7 +907,7 @@ export default function ProjectDetailPage() {
                 </h2>
                 <div className="text-xs text-slate-600 leading-relaxed space-y-3">
                   <p>
-                    {projectData?.description || "Cortex centralizes requirements, decisions, tasks, meetings, and documents for the team into one permission-aware workspace, replacing scattered docs and chat threads with a single source of truth."}
+                    {projectData?.description || "No description provided."}
                   </p>
                   <p>
                     The workspace is powered by pgvector semantic search and an integrated AI Copilot for grounded Q&amp;A, requirement analysis, and citation-backed project intelligence.
@@ -1208,7 +1207,7 @@ export default function ProjectDetailPage() {
                       <span>Status</span>
                     </div>
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60]">
-                      {String(projectData?.status || "On track")}
+                      {String(projectData?.status || "Unknown")}
                     </span>
                   </div>
 
@@ -1241,7 +1240,7 @@ export default function ProjectDetailPage() {
                       <span>Priority</span>
                     </div>
                     <span className="font-medium text-slate-800">
-                      {String(projectData?.priority || "High")}
+                      {String(projectData?.priority || "Not set")}
                     </span>
                   </div>
 
@@ -1412,7 +1411,7 @@ export default function ProjectDetailPage() {
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pt-1">
                   <div>
                     <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono font-medium text-blue-600 bg-blue-100/70 border border-blue-200 mb-2">
-                      {String(selectedReq.displayKey || selectedReq.id || "REQ-001")}
+                      {String(selectedReq.displayKey || selectedReq.id || "Key unavailable")}
                     </span>
                     <h1 className="text-base sm:text-lg font-bold text-slate-900 font-serif">
                       {String(selectedReq.title || "Requirement Title")}
@@ -2266,7 +2265,7 @@ export default function ProjectDetailPage() {
                             {String(selectedDoc.title || selectedDoc.originalFilename || "Document")}
                           </h4>
                           <p className="text-[11px] text-slate-400">
-                            {String(selectedDoc.type || "PDF")} · {formatDocSize(selectedDoc)} · Uploaded by {getUploaderName(selectedDoc, "Team member")} · {selectedDoc.createdAt ? formatDate(selectedDoc.createdAt) : selectedDoc.uploadedDate || "Recently"}
+                            {String(selectedDoc.mimeType || selectedDoc.type || "Type unavailable")} · {formatDocSize(selectedDoc)} · Uploaded by {getUploaderName(selectedDoc, "Team member")} · {selectedDoc.createdAt ? formatDate(selectedDoc.createdAt) : selectedDoc.uploadedDate || "Date unavailable"}
                           </p>
                         </div>
                       </div>
@@ -2303,7 +2302,7 @@ export default function ProjectDetailPage() {
                       <div className="space-y-3 text-xs">
                         <div className="flex items-center justify-between">
                           <span className="text-slate-500">Type</span>
-                          <span className="font-semibold text-slate-800">{String(selectedDoc.type || "PDF")}</span>
+                          <span className="font-semibold text-slate-800">{String(selectedDoc.mimeType || selectedDoc.type || "Type unavailable")}</span>
                         </div>
 
                         <div className="flex items-center justify-between">
@@ -2318,14 +2317,14 @@ export default function ProjectDetailPage() {
 
                         <div className="flex items-center justify-between">
                           <span className="text-slate-500">Uploaded</span>
-                          <span className="font-semibold text-slate-800">{selectedDoc.createdAt ? formatDate(selectedDoc.createdAt) : selectedDoc.uploadedDate || "Recently"}</span>
+                          <span className="font-semibold text-slate-800">{selectedDoc.createdAt ? formatDate(selectedDoc.createdAt) : selectedDoc.uploadedDate || "Date unavailable"}</span>
                         </div>
 
                         <div className="flex items-center justify-between">
                           <span className="text-slate-500">Status</span>
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60]">
                             <span className="w-1.5 h-1.5 rounded-full bg-[#2D8A60]" />
-                            {String(selectedDoc.status || "Indexed")}
+                            {String(selectedDoc.processingStatus || selectedDoc.status || "Unknown")}
                           </span>
                         </div>
                       </div>
@@ -2394,7 +2393,7 @@ export default function ProjectDetailPage() {
                       const statusStr = formatDocStatus(doc.status);
                       const docSizeStr = formatDocSize(doc);
                       const uploaderName = getUploaderName(doc, "Team member");
-                      const dateStr = doc.createdAt ? formatDate(doc.createdAt) : doc.uploadedDate || "Recently";
+                      const dateStr = doc.createdAt ? formatDate(doc.createdAt) : doc.uploadedDate || "Date unavailable";
 
                       return (
                         <div
@@ -2784,7 +2783,7 @@ export default function ProjectDetailPage() {
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded text-[11px] font-mono font-medium text-blue-600 bg-blue-50 border border-blue-200">
-                    {String(selectedReq.displayKey || selectedReq.id || "REQ-001")}
+                    {String(selectedReq.displayKey || selectedReq.id || "Key unavailable")}
                   </span>
                   <h3 className="text-sm font-bold text-slate-900 font-serif">Edit Requirement</h3>
                 </div>

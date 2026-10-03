@@ -586,7 +586,7 @@ export default function DashboardPage() {
                               <span className="font-mono text-[10px] text-slate-400">
                                 {formatBytes(doc.sizeBytes)} · Rev {doc.revision ?? 1}
                               </span>
-                              <span>Status: {doc.processingStatus || "READY"}</span>
+                              <span>Status: {doc.processingStatus || "Unknown"}</span>
                             </div>
                           </div>
                         </div>

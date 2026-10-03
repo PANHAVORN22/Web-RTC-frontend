@@ -124,7 +124,7 @@ export default function ProfilePage() {
       .map((n) => n[0])
       .join("")
       .slice(0, 2)
-      .toUpperCase() || "AD";
+      .toUpperCase() || "?";
 
   const isSuperAdmin = user?.systemRole === "ADMIN";
 
@@ -278,7 +278,7 @@ export default function ProfilePage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-bold font-serif text-slate-900">
-                      {displayName || "Alice Developer"}
+                      {displayName || user?.email || "Unknown user"}
                     </h2>
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${getProfRoleBadgeStyle(
@@ -302,7 +302,7 @@ export default function ProfilePage() {
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {user?.email || "user@example.com"}
+                    {user?.email || "Email unavailable"}
                   </p>
                 </div>
               </div>
@@ -324,7 +324,7 @@ export default function ProfilePage() {
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. Alice Developer"
+                  placeholder="Your display name"
                   maxLength={100}
                   className="h-10 text-xs rounded-xl border border-slate-200 focus-visible:ring-blue-500"
                 />

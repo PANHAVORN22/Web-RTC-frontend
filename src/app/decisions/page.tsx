@@ -43,6 +43,8 @@ interface DecisionItem {
   decisionText: string;
   rationale?: string | null;
   status: "PROPOSED" | "ACCEPTED" | "SUPERSEDED";
+  createdBy?: string | null;
+  creator?: { displayName?: string; name?: string; email?: string } | null;
   decidedAt?: string | null;
   decidedBy?: string | null;
   decider?: {
@@ -66,28 +68,28 @@ interface DecisionItem {
   metadata?: any;
 }
 
-// User Avatars and initials matching mockups exactly
+// Initials and colors are derived from recorded users.
 function getInitials(name?: string | null): string {
-  if (!name) return "NP";
+  if (!name || name === "Not decided yet" || name === "Unknown user") return "—";
   const trimmed = name.trim();
-  if (trimmed === "Panhavorn") return "NP";
-  if (trimmed === "Meng Fong" || trimmed === "Mengfong" || trimmed === "Fong") return "MF";
-  if (trimmed === "Mengchheang") return "MC";
-  if (trimmed === "John Smith") return "JS";
-  if (trimmed === "Jane Doe") return "JD";
   const parts = trimmed.split(/\s+/);
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function getAvatarColor(name?: string | null): string {
-  const trimmed = (name || "").trim();
-  if (trimmed.includes("Panhavorn")) return "bg-[#d97706] text-white"; // amber/orange
-  if (trimmed.includes("Meng Fong") || trimmed.includes("Mengfong") || trimmed.includes("Fong")) return "bg-[#2563eb] text-white"; // blue
-  if (trimmed.includes("Mengchheang")) return "bg-[#ef4444] text-white"; // red
-  if (trimmed.includes("John Smith") || trimmed.includes("John")) return "bg-[#1e293b] text-white"; // dark slate
-  if (trimmed.includes("Jane Doe") || trimmed.includes("Jane")) return "bg-[#3b82f6] text-white"; // light blue
+function getAvatarColor(_name?: string | null): string {
   return "bg-slate-700 text-white";
+}
+
+function DecisionStatus({ status }: { status: DecisionItem["status"] }) {
+  const styles = {
+    PROPOSED: "bg-amber-50 text-amber-700 border-amber-200",
+    ACCEPTED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    SUPERSEDED: "bg-slate-100 text-slate-600 border-slate-200",
+    REJECTED: "bg-rose-50 text-rose-700 border-rose-200",
+  };
+  const labels = { PROPOSED: "Proposed", ACCEPTED: "Accepted", SUPERSEDED: "Superseded" };
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${styles[status] || styles.PROPOSED}`}>{labels[status] || "Unknown"}</span>;
 }
 
 // Project pill styling matching image 1
@@ -108,12 +110,12 @@ function getProjectBadgeStyle(projectName?: string | null) {
   return "bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]";
 }
 
-// Date formatter e.g. "14 Sep 2026"
+// Format a recorded date.
 function formatDecisionDate(dateStr?: string | Date | null): string {
-  if (!dateStr) return "14 Sep 2026";
+  if (!dateStr) return "Date unavailable";
   try {
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return String(dateStr);
+    if (isNaN(d.getTime())) return "Date unavailable";
     const day = d.getDate();
     const months = [
       "Jan",
@@ -158,17 +160,12 @@ export default function DecisionsPage() {
   const [createTitle, setCreateTitle] = useState("");
   const [createRationale, setCreateRationale] = useState("");
   const [createProjectId, setCreateProjectId] = useState("");
-  const [createDecidedBy, setCreateDecidedBy] = useState("Fong");
-  const [createDate, setCreateDate] = useState("");
   const [createRequirementId, setCreateRequirementId] = useState("");
   const [submittingCreate, setSubmittingCreate] = useState(false);
 
   // Edit Form state
   const [editTitle, setEditTitle] = useState("");
   const [editRationale, setEditRationale] = useState("");
-  const [editProjectId, setEditProjectId] = useState("");
-  const [editDecidedBy, setEditDecidedBy] = useState("");
-  const [editDate, setEditDate] = useState("");
   const [editStatus, setEditStatus] = useState<"PROPOSED" | "ACCEPTED" | "SUPERSEDED">("ACCEPTED");
   const [submittingEdit, setSubmittingEdit] = useState(false);
 
@@ -184,26 +181,6 @@ export default function DecisionsPage() {
   // Delete confirmation state
   const [deleteConfirmDec, setDeleteConfirmDec] = useState<DecisionItem | null>(null);
   const [deletingDec, setDeletingDec] = useState(false);
-
-  // Standard member options fallback matching design
-  const teamMemberOptions = useMemo(() => {
-    const list = [
-      { id: "Panhavorn", name: "Panhavorn" },
-      { id: "Fong", name: "Fong" },
-      { id: "Mengchheang", name: "Mengchheang" },
-      { id: "John Smith", name: "John Smith" },
-      { id: "Jane Doe", name: "Jane Doe" },
-    ];
-    if (members && members.length > 0) {
-      for (const m of members) {
-        const name = m.name || m.displayName || m.email;
-        if (name && !list.find((item) => item.name === name)) {
-          list.push({ id: m.id || m.userId || name, name });
-        }
-      }
-    }
-    return list;
-  }, [members]);
 
   // Load all decisions across all projects
   const loadData = useCallback(async () => {
@@ -324,7 +301,7 @@ export default function DecisionsPage() {
     for (const item of items) {
       if (item.projectId) set.add(item.projectId);
     }
-    return set.size || projects.length || 1;
+    return set.size || projects.length;
   }, [items, projects]);
 
   // Open Detail View
@@ -345,9 +322,6 @@ export default function DecisionsPage() {
         ? selectedProjectId
         : currentProject?.id || projects[0]?.id || ""
     );
-    setCreateDecidedBy("Fong");
-    const today = new Date().toISOString().split("T")[0];
-    setCreateDate(today);
     setCreateRequirementId("");
     setViewState("new");
     if (typeof window !== "undefined") {
@@ -360,18 +334,7 @@ export default function DecisionsPage() {
     setActiveDec(item);
     setEditTitle(item.title);
     setEditRationale(item.rationale || "");
-    setEditProjectId(item.projectId || currentProject?.id || "");
-    setEditDecidedBy(
-      item.decider?.name ||
-        item.decider?.displayName ||
-        item.metadata?.decidedByName ||
-        "Fong"
-    );
-    const dateVal = item.decidedAt
-      ? new Date(item.decidedAt).toISOString().split("T")[0]
-      : new Date(item.createdAt).toISOString().split("T")[0];
-    setEditDate(dateVal);
-    setEditStatus(item.status || "ACCEPTED");
+    setEditStatus(item.status || "PROPOSED");
     setViewState("edit");
   };
 
@@ -417,9 +380,6 @@ export default function DecisionsPage() {
           projects.find((p) => p.id === targetProjId)?.name || currentProject?.name,
         projectKey:
           projects.find((p) => p.id === targetProjId)?.key || currentProject?.key,
-        metadata: {
-          decidedByName: createDecidedBy,
-        },
       };
       openDetailView(newItem);
     } catch (err: any) {
@@ -457,10 +417,6 @@ export default function DecisionsPage() {
         title: editTitle.trim(),
         rationale: editRationale.trim(),
         status: editStatus,
-        metadata: {
-          ...(activeDec.metadata || {}),
-          decidedByName: editDecidedBy,
-        },
       };
       setActiveDec(updatedDec);
       setViewState("detail");
@@ -518,27 +474,17 @@ export default function DecisionsPage() {
 
   // Helper to determine decider display name
   const getDeciderName = (item: DecisionItem): string => {
-    if (item.metadata?.decidedByName) return item.metadata.decidedByName;
-    if (item.decider?.name) return item.decider.name;
-    if (item.decider?.displayName) return item.decider.displayName;
-    // Map by title or fallback names for realistic mockup reproduction
-    const t = (item.title || "").toLowerCase();
-    if (t.includes("postgresql")) return "Panhavorn";
-    if (t.includes("fastapi") || t.includes("nestjs")) return "Mengfong";
-    if (t.includes("oauth") || t.includes("email/password")) return "Panhavorn";
-    if (t.includes("github integration")) return "Mengchheang";
-    if (t.includes("freeze") || t.includes("sign-off")) return "John Smith";
-    if (t.includes("sso")) return "Mengchheang";
-    if (t.includes("spacing grid")) return "Jane Doe";
-    if (t.includes("typography")) return "Mengfong";
-    return "Panhavorn";
+    if (!item.decidedBy && !item.decider) return "Not decided yet";
+    if (item.decider?.displayName || item.decider?.name || item.decider?.email) return item.decider.displayName || item.decider.name || item.decider.email || "Unknown user";
+    const member = members.find((person) => (person.userId || person.id) === item.decidedBy);
+    return member?.displayName || member?.email || "Unknown user";
   };
 
-  // Helper to determine date value
-  const getDisplayDate = (item: DecisionItem): string => {
-    if (item.decidedAt) return formatDecisionDate(item.decidedAt);
-    if (item.createdAt) return formatDecisionDate(item.createdAt);
-    return "14 Sep 2026";
+  const getProposerName = (item: DecisionItem): string => {
+    const creator = item.creator;
+    if (creator?.displayName || creator?.name || creator?.email) return creator.displayName || creator.name || creator.email || "Unknown user";
+    const member = members.find((person) => (person.userId || person.id) === item.createdBy);
+    return member?.displayName || member?.email || "Unknown user";
   };
 
   return (
@@ -634,23 +580,26 @@ export default function DecisionsPage() {
                         Project
                       </th>
                       <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
-                        Decided by
+                        Proposed by
                       </th>
                       <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
-                        Date
+                        Approval
+                      </th>
+                      <th className="py-3 px-6 text-[11px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                        Created
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
                       <tr>
-                        <td colSpan={4} className="py-12 text-center text-xs text-slate-400">
+                        <td colSpan={5} className="py-12 text-center text-xs text-slate-400">
                           Loading decisions...
                         </td>
                       </tr>
                     ) : filteredItems.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-16 text-center">
+                        <td colSpan={5} className="py-16 text-center">
                           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2">
                             <FileCheck2 className="w-5 h-5" />
                           </div>
@@ -665,10 +614,11 @@ export default function DecisionsPage() {
                     ) : (
                       filteredItems.map((item) => {
                         const deciderName = getDeciderName(item);
-                        const initials = getInitials(deciderName);
-                        const avatarClass = getAvatarColor(deciderName);
+                        const proposerName = getProposerName(item);
+                        const initials = getInitials(proposerName);
+                        const avatarClass = getAvatarColor(proposerName);
                         const projectPillClass = getProjectBadgeStyle(item.projectName);
-                        const dateText = getDisplayDate(item);
+                        const dateText = formatDecisionDate(item.createdAt);
 
                         return (
                           <tr
@@ -681,6 +631,10 @@ export default function DecisionsPage() {
                               <span className="text-xs font-semibold text-slate-900 group-hover:text-codex-accent transition-colors font-serif">
                                 {item.title}
                               </span>
+                              <div className="mt-1.5 flex items-center gap-2">
+                                <DecisionStatus status={item.status} />
+                                {item.displayKey && <span className="text-[10px] font-mono text-slate-400">{item.displayKey}</span>}
+                              </div>
                             </td>
 
                             {/* Column 2: Project Pill */}
@@ -688,11 +642,11 @@ export default function DecisionsPage() {
                               <span
                                 className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium ${projectPillClass}`}
                               >
-                                {item.projectName || "AI Project Workspace"}
+                                {item.projectName || "Unknown project"}
                               </span>
                             </td>
 
-                            {/* Column 3: Decided by (Avatar + Name) */}
+                            {/* Recorded proposal author */}
                             <td className="py-3.5 px-6">
                               <div className="flex items-center gap-2">
                                 <div
@@ -701,12 +655,23 @@ export default function DecisionsPage() {
                                   {initials}
                                 </div>
                                 <span className="text-xs text-slate-700 font-medium">
-                                  {deciderName}
+                                  {proposerName}
                                 </span>
                               </div>
                             </td>
 
-                            {/* Column 4: Date */}
+                            <td className="py-3.5 px-6">
+                              {item.status === "PROPOSED" ? (
+                                <span className="text-xs text-slate-500">Awaiting review</span>
+                              ) : (
+                                <div className="space-y-1">
+                                  <span className="text-xs font-medium text-slate-700">{item.decidedBy || item.decider ? deciderName : "No approval recorded"}</span>
+                                  {item.decidedAt && <p className="text-[10px] text-slate-400">{formatDecisionDate(item.decidedAt)}</p>}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Creation date is separate from approval date */}
                             <td className="py-3.5 px-6 text-xs text-slate-500 font-medium">
                               {dateText}
                             </td>
@@ -789,7 +754,7 @@ export default function DecisionsPage() {
                   <h2 className="text-sm font-bold text-slate-900 font-serif">Rationale</h2>
                   <p className="text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                     {activeDec.rationale ||
-                      "Postgres gives relational integrity for users, roles, and permissions, and supports pgvector embeddings for AI Copilot retrieval."}
+                      "No rationale recorded."}
                   </p>
                 </div>
 
@@ -797,27 +762,12 @@ export default function DecisionsPage() {
                 <div className="bg-white border border-codex-border/80 rounded-2xl p-6 shadow-xs space-y-3">
                   <h2 className="text-sm font-bold text-slate-900 font-serif">Related items</h2>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {activeDec.requirement ? (
-                      <Link
-                        href={`/requirements?id=${activeDec.requirement.id}`}
-                        className="inline-flex items-center gap-1 bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe] px-2.5 py-1 rounded-md text-xs font-semibold hover:bg-blue-100/60 transition-colors"
-                      >
-                        <FileCheck2 className="w-3 h-3" />
-                        <span>
-                          {activeDec.requirement.displayKey ||
-                            activeDec.requirement.key ||
-                            "REQ-001"}
-                        </span>
+                    {activeDec.requirementId ? (
+                      <Link href={`/requirements?id=${activeDec.requirementId}`} className="inline-flex items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs text-blue-600">
+                        <FileCheck2 className="h-3 w-3" />
+                        {activeDec.requirement?.displayKey || requirements.find((requirement) => requirement.id === activeDec.requirementId)?.displayKey || "Linked requirement"}
                       </Link>
-                    ) : (
-                      <span className="inline-flex items-center bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe] px-2.5 py-1 rounded-md text-xs font-semibold">
-                        REQ-001
-                      </span>
-                    )}
-
-                    <span className="inline-flex items-center bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0] px-2.5 py-1 rounded-md text-xs font-semibold">
-                      Phase 1 Kickoff
-                    </span>
+                    ) : <span className="text-xs text-slate-500">No linked requirement.</span>}
                   </div>
                 </div>
 
@@ -875,42 +825,38 @@ export default function DecisionsPage() {
                           activeDec.projectName
                         )}`}
                       >
-                        {activeDec.projectName || "AI Project Workspace"}
+                        {activeDec.projectName || "Unknown project"}
                       </span>
                     </div>
 
-                    {/* Decided by */}
                     <div className="flex items-center justify-between text-xs gap-2">
-                      <span className="text-slate-500 font-medium">Decided by</span>
+                      <span className="text-slate-500 font-medium">Proposed by</span>
                       <div className="flex items-center gap-2">
-                        <div
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${getAvatarColor(
-                            getDeciderName(activeDec)
-                          )}`}
-                        >
-                          {getInitials(getDeciderName(activeDec))}
-                        </div>
-                        <span className="text-slate-800 font-semibold">
-                          {getDeciderName(activeDec)}
-                        </span>
+                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${getAvatarColor(getProposerName(activeDec))}`}>{getInitials(getProposerName(activeDec))}</span>
+                        <span className="text-slate-800 font-semibold">{getProposerName(activeDec)}</span>
                       </div>
                     </div>
-
-                    {/* Date */}
                     <div className="flex items-center justify-between text-xs gap-2">
-                      <span className="text-slate-500 font-medium">Date</span>
-                      <span className="text-slate-800 font-medium">
-                        {getDisplayDate(activeDec)}
-                      </span>
+                      <span className="text-slate-500 font-medium">Created</span>
+                      <span className="text-slate-800 font-medium">{formatDecisionDate(activeDec.createdAt)}</span>
                     </div>
-
-                    {/* Status */}
-                    <div className="flex items-center justify-between text-xs gap-2 pt-1 border-t border-slate-100">
+                    <div className="flex items-center justify-between text-xs gap-2 pt-3 border-t border-slate-100">
                       <span className="text-slate-500 font-medium">Status</span>
-                      <span className="font-mono text-[10px] font-bold text-[#10b981] bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                        {activeDec.status || "ACCEPTED"}
-                      </span>
+                      <DecisionStatus status={activeDec.status} />
                     </div>
+                    {activeDec.status === "PROPOSED" ? (
+                      <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-800">
+                        Awaiting review. The approver and approval date will appear when this proposal is accepted.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between text-xs gap-2">
+                          <span className="text-slate-500 font-medium">Approved by</span>
+                          <span className="text-slate-800 font-medium">{activeDec.decidedBy || activeDec.decider ? getDeciderName(activeDec) : "No approval recorded"}</span>
+                        </div>
+                        {activeDec.decidedAt && <div className="flex items-center justify-between text-xs gap-2"><span className="text-slate-500 font-medium">Approved on</span><span className="text-slate-800 font-medium">{formatDecisionDate(activeDec.decidedAt)}</span></div>}
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1003,35 +949,7 @@ export default function DecisionsPage() {
                     />
                   </div>
 
-                  {/* Decided by */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-800">Decided by</label>
-                    <DropdownSelect
-                      value={createDecidedBy}
-                      onChange={setCreateDecidedBy}
-                      className="w-full"
-                      triggerClassName="w-full h-10"
-                      options={teamMemberOptions.map((m) => ({
-                        value: m.name,
-                        label: m.name,
-                        avatar: {
-                          initials: getInitials(m.name),
-                          colorClass: getAvatarColor(m.name),
-                        },
-                      }))}
-                    />
-                  </div>
-
-                  {/* Date */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-800">Date</label>
-                    <input
-                      type="date"
-                      value={createDate}
-                      onChange={(e) => setCreateDate(e.target.value)}
-                      className="w-full h-10 px-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 shadow-2xs"
-                    />
-                  </div>
+                  <p className="text-xs leading-relaxed text-slate-500 sm:col-span-2">The system records who accepts a decision and when it is accepted.</p>
                 </div>
 
                 {/* Bottom Actions matching Image 3 */}
@@ -1128,49 +1046,10 @@ export default function DecisionsPage() {
                   {/* Project */}
                   <div className="space-y-1.5">
                     <label className="block text-xs font-semibold text-slate-800">Project</label>
-                    <DropdownSelect
-                      value={editProjectId}
-                      onChange={setEditProjectId}
-                      className="w-full"
-                      triggerClassName="w-full h-10"
-                      options={projects.map((p) => ({
-                        value: p.id,
-                        label: p.name,
-                        badge: `[${p.key}]`,
-                        badgeColor: getProjectBadgeStyle(p.name),
-                      }))}
-                    />
+                    <p className="flex h-10 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700">{activeDec.projectName || "Unknown project"}</p>
                   </div>
 
-                  {/* Decided by */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-800">Decided by</label>
-                    <DropdownSelect
-                      value={editDecidedBy}
-                      onChange={setEditDecidedBy}
-                      className="w-full"
-                      triggerClassName="w-full h-10"
-                      options={teamMemberOptions.map((m) => ({
-                        value: m.name,
-                        label: m.name,
-                        avatar: {
-                          initials: getInitials(m.name),
-                          colorClass: getAvatarColor(m.name),
-                        },
-                      }))}
-                    />
-                  </div>
-
-                  {/* Date */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-800">Date</label>
-                    <input
-                      type="date"
-                      value={editDate}
-                      onChange={(e) => setEditDate(e.target.value)}
-                      className="w-full h-10 px-3 rounded-xl border border-codex-border/90 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-codex-accent/20 shadow-2xs"
-                    />
-                  </div>
+                  <p className="text-xs leading-relaxed text-slate-500 sm:col-span-2">The system records who accepts a decision and when it is accepted.</p>
                 </div>
 
                 {/* Bottom Actions matching Image 4 */}

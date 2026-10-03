@@ -29,15 +29,10 @@ interface ProjectDisplayItem {
   name: string;
   key: string;
   description: string;
-  status: "On track" | "In progress" | "Archived";
-  progress: number;
+  status: string;
   dueDate: string;
-  tasksCount: number;
-  reqsCount: number;
   role: string;
-  avatars: { text: string; bg: string }[];
   isArchived: boolean;
-  isBackendProject?: boolean;
   rawProject: Project;
 }
 
@@ -65,16 +60,11 @@ export default function ProjectsPage() {
         id: bp.id,
         name: bp.name,
         key: bp.key,
-        description: bp.description || "Project workspace for requirements, tasks, decisions, and documents.",
-        status: isArch ? "Archived" : "On track",
-        progress: isArch ? 100 : 0,
+        description: bp.description || "No description provided.",
+        status: bp.status,
         dueDate: bp.createdAt ? `Created ${new Date(bp.createdAt).toLocaleDateString()}` : "Active",
-        tasksCount: 0,
-        reqsCount: 0,
         role: bp.currentUserRole || "Member",
-        avatars: [{ text: (bp.key || "PR").slice(0, 2).toUpperCase(), bg: "bg-blue-600" }],
         isArchived: isArch,
-        isBackendProject: true,
         rawProject: bp,
       };
     });
@@ -136,17 +126,17 @@ export default function ProjectsPage() {
   };
 
   const renderBadge = (status: ProjectDisplayItem["status"]) => {
-    if (status === "On track") {
+    if (status === "ACTIVE") {
       return (
         <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#E8F5E9] text-[#2D8A60]">
           Active
         </span>
       );
     }
-    if (status === "In progress") {
+    if (status !== "ARCHIVED") {
       return (
         <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#FEF3C7] text-[#D97706]">
-          In progress
+          {status || "Unknown status"}
         </span>
       );
     }

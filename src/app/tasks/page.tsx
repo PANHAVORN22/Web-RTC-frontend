@@ -62,6 +62,11 @@ interface TaskItem {
   dueDate?: string | null;
   requirementId?: string | null;
   sourceMeetingId?: string | null;
+  aiProvenance?: {
+    sourceEntityType: string;
+    sourceRevision: number;
+    sourceReferences: Array<{ chunkId: string; title: string; revision: number; locator: string }>;
+  } | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -100,11 +105,6 @@ function formatDueDate(dueDateStr: string | null | undefined): string {
 function getInitials(name?: string | null): string {
   if (!name) return "??";
   const trimmed = name.trim();
-  if (trimmed === "Panhavorn") return "NP";
-  if (trimmed === "Meng Fong") return "NS";
-  if (trimmed === "Mengchheang") return "MC";
-  if (trimmed === "John Smith") return "JS";
-  if (trimmed === "Jane Doe") return "JD";
   const parts = trimmed.split(/\s+/);
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
@@ -112,11 +112,6 @@ function getInitials(name?: string | null): string {
 
 function getAssigneeColor(name: string): string {
   const trimmed = name.trim();
-  if (trimmed === "Panhavorn") return "bg-[#d97706]";
-  if (trimmed === "Meng Fong") return "bg-[#2563eb]";
-  if (trimmed === "Mengchheang") return "bg-[#ef4444]";
-  if (trimmed === "John Smith") return "bg-[#059669]";
-  if (trimmed === "Jane Doe") return "bg-[#1e293b]";
 
   const colors = [
     "bg-amber-600",
@@ -325,13 +320,6 @@ export default function TasksPage() {
   }, [activeProjectsList]);
 
   const taskAssigneeOptions: FilterOption[] = useMemo(() => {
-    if (assigneesList.length === 0) {
-      return [
-        { value: "Fong", label: "Fong", color: "#6366F1" },
-        { value: "Panhavorn", label: "Panhavorn", color: "#D97706" },
-        { value: "Mengchheang", label: "Mengchheang", color: "#C0392B" },
-      ];
-    }
     return assigneesList.map((a, idx) => ({
       value: a.name,
       label: a.name,
@@ -452,7 +440,7 @@ export default function TasksPage() {
     setCreateDueDate("");
     setCreateAssigneeId("");
     setCreateBlockedReason(
-      initialStatus === "BLOCKED" ? "Waiting on dependency / review" : ""
+      initialStatus === "BLOCKED" ? "No blocked reason recorded" : ""
     );
     setCreateModalOpen(true);
   };
@@ -506,7 +494,7 @@ export default function TasksPage() {
     // Determine new blocked reason
     let newBlockedReason = taskToMove.blockedReason;
     if (targetStatus === "BLOCKED" && !newBlockedReason) {
-      newBlockedReason = "Waiting on dependency / review";
+      newBlockedReason = "No blocked reason recorded";
     } else if (targetStatus !== "BLOCKED") {
       newBlockedReason = null;
     }
@@ -603,6 +591,21 @@ export default function TasksPage() {
     setEditAssigneeId(task.assigneeId || "");
     setEditBlockedReason(task.blockedReason || "");
   };
+
+  useEffect(() => {
+    if (!editingTask?.id || !editingTask.projectId) return;
+    const taskId = editingTask.id;
+    let cancelled = false;
+    api.tasks.get(editingTask.projectId, taskId).then((detail: TaskItem) => {
+      if (cancelled) return;
+      setEditingTask((current) => current?.id === taskId
+        ? { ...current, aiProvenance: detail.aiProvenance }
+        : current);
+    }).catch(() => {
+      if (!cancelled) showToast("Could not load task source details. Reopen the task to retry.", "error");
+    });
+    return () => { cancelled = true; };
+  }, [editingTask?.id, editingTask?.projectId, showToast]);
 
   const handleUpdateTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -953,7 +956,7 @@ export default function TasksPage() {
                                         <div className="bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] rounded-md px-2 py-1 text-[11px] flex items-center gap-1.5 font-normal">
                                           <AlertCircle className="w-3 h-3 shrink-0" />
                                           <span className="truncate">
-                                            {task.blockedReason || "Waiting on dependency / review"}
+                                            {task.blockedReason || "No blocked reason recorded"}
                                           </span>
                                         </div>
                                       )}
@@ -1151,8 +1154,8 @@ export default function TasksPage() {
                         {/* Due Column */}
                         <td className="py-3 px-4">
                           {isBlocked ? (
-                            <span className="text-[11px] text-slate-500 font-normal block" title={task.blockedReason || "Waiting on dependency / review"}>
-                              {task.blockedReason || "Waiting on dependency / review"}
+                            <span className="text-[11px] text-slate-500 font-normal block" title={task.blockedReason || "No blocked reason recorded"}>
+                              {task.blockedReason || "No blocked reason recorded"}
                             </span>
                           ) : isDone ? (
                             <span className="text-[11px] text-slate-400 font-normal">Completed</span>
@@ -1414,6 +1417,16 @@ export default function TasksPage() {
                     className="h-9 text-xs"
                   />
                 </div>
+
+                {editingTask.aiProvenance && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-semibold">AI proposal sources</p>
+                    <p>Generated from {editingTask.aiProvenance.sourceEntityType.toLowerCase()} revision {editingTask.aiProvenance.sourceRevision}.</p>
+                    {editingTask.aiProvenance.sourceReferences.map((source) => (
+                      <p key={source.chunkId}>{source.title} · revision {source.revision} · {source.locator}</p>
+                    ))}
+                  </div>
+                )}
 
                 {/* Status & Priority */}
                 <div className="grid grid-cols-2 gap-3">

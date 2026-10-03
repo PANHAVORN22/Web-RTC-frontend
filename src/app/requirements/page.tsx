@@ -61,11 +61,6 @@ interface RequirementItem {
 function getInitials(name?: string | null): string {
   if (!name) return "??";
   const trimmed = name.trim();
-  if (trimmed === "Panhavorn") return "NP";
-  if (trimmed === "Meng Fong" || trimmed === "Mengfong") return "MF";
-  if (trimmed === "Mengchheang") return "MC";
-  if (trimmed === "John Smith") return "IS";
-  if (trimmed === "Jane Doe") return "JD";
   const parts = trimmed.split(/\s+/);
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
@@ -74,11 +69,6 @@ function getInitials(name?: string | null): string {
 function getAvatarColor(name?: string | null): string {
   if (!name) return "bg-slate-700";
   const trimmed = name.trim();
-  if (trimmed === "Panhavorn") return "bg-[#d97706]";
-  if (trimmed === "Meng Fong" || trimmed === "Mengfong") return "bg-[#2563eb]";
-  if (trimmed === "Mengchheang") return "bg-[#ef4444]";
-  if (trimmed === "John Smith") return "bg-[#0f172a]";
-  if (trimmed === "Jane Doe") return "bg-[#059669]";
 
   const colors = [
     "bg-amber-600",
@@ -705,8 +695,8 @@ export default function RequirementsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {filteredItems.map((req) => {
-                    const projectName = req.project?.name || "AI Project Workspace";
-                    const updaterName = req.updater?.displayName || req.creator?.displayName || "Panhavorn";
+                    const projectName = req.project?.name || "Unknown project";
+                    const updaterName = req.updater?.displayName || req.updater?.email || req.creator?.displayName || req.creator?.email || "Unknown user";
                     const priorityLabel = getPriorityLabel(req.priority);
                     const priorityBadgeStyle = getPriorityBadgeStyle(req.priority);
                     const projectBadgeStyle = getProjectBadgeStyle(projectName);

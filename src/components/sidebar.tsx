@@ -46,15 +46,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
   const { user, logout } = useAuth();
 
   // Get user display name and initials
-  const displayName = user?.displayName || user?.fullName || "Alice Developer";
-  const userRole = user?.professionalRole || user?.systemRole || user?.role || "Developer";
+  const displayName = user?.displayName || user?.fullName || user?.email || "Unknown user";
+  const userRole = user?.professionalRole || user?.systemRole || user?.role || "Unknown role";
   const initials =
     displayName
       .split(" ")
       .map((n) => n[0])
       .join("")
       .slice(0, 2)
-      .toUpperCase() || "AD";
+      .toUpperCase() || "?";
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -156,7 +156,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
                 {displayName}
               </p>
               <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                {user?.email || "user@example.com"}
+                {user?.email || "Email unavailable"}
               </p>
               <p className="text-[11px] text-slate-300 font-medium mt-1 truncate">
                 Signed in as <span className="text-blue-400 font-semibold">{roleLabel}</span>

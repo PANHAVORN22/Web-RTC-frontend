@@ -46,10 +46,11 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${bytes} B`;
 }
 
-// Relative time formatting matching mockup (e.g. 1h ago, 3h ago, Yesterday, 2 days ago)
+// Format the recorded upload time.
 function formatRelativeTime(dateInput: string | Date | null | undefined): string {
-  if (!dateInput) return "Recently";
+  if (!dateInput) return "Date unavailable";
   const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (isNaN(date.getTime())) return "Date unavailable";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
@@ -111,23 +112,8 @@ function getFileCategory(
 
 // User avatar initials & color styling
 function getUserAvatarStyle(displayName?: string, email?: string) {
-  const name = (displayName || email || "User").trim();
-  const lower = name.toLowerCase();
-
-  if (lower.includes("panhavorn")) {
-    return { initials: "NP", bg: "bg-amber-500 text-white", name: "Panhavorn" };
-  }
-  if (lower.includes("john") || lower.includes("smith")) {
-    return { initials: "JS", bg: "bg-slate-900 text-white", name: "John Smith" };
-  }
-  if (lower.includes("meng") || lower.includes("fong")) {
-    return { initials: "MF", bg: "bg-blue-600 text-white", name: "Mengfong" };
-  }
-  if (lower.includes("jane") || lower.includes("doe")) {
-    return { initials: "JD", bg: "bg-indigo-500 text-white", name: "Jane Doe" };
-  }
-
-  // Fallback initials
+  const name = (displayName || email || "Unknown user").trim();
+  // Initials come from the recorded user name.
   const parts = name.split(" ").filter(Boolean);
   const initials =
     parts.length >= 2
@@ -170,14 +156,6 @@ const TYPE_FILTER_OPTIONS: FilterOption[] = [
   { value: "presentation", label: "PowerPoint", color: "#D97706" },
 ];
 
-const UPLOADER_FILTER_OPTIONS: FilterOption[] = [
-  { value: "Fong", label: "Fong", color: "#6366F1" },
-  { value: "Meng", label: "Mengchheang", color: "#D97706" },
-  { value: "Panhavorn", label: "Panhavorn", color: "#059669" },
-  { value: "John", label: "John Smith", color: "#C0392B" },
-  { value: "Jane", label: "Jane Doe", color: "#3B82F6" },
-];
-
 export default function DocumentsPage() {
   const { currentProject, projects } = useAuth();
   const { showToast } = useToast();
@@ -186,12 +164,25 @@ export default function DocumentsPage() {
   const revisionFileInputRef = useRef<HTMLInputElement>(null);
 
   const [docs, setDocs] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.workspace.getMembers().then((users) => { if (!cancelled) setMembers(users); }).catch(() => { if (!cancelled) setMembers([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const uploaderOptions: FilterOption[] = useMemo(() => members.map((member, index) => ({
+    value: member.userId || member.id,
+    label: member.displayName || member.email || "Unknown user",
+    color: PROJECT_FILTER_COLORS[index % PROJECT_FILTER_COLORS.length],
+  })), [members]);
 
   // View mode: Grid vs List
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -328,8 +319,7 @@ export default function DocumentsPage() {
 
       // Uploader filter
       if (selectedUploader !== "ALL") {
-        const uploaderName = (doc.creator?.displayName || "").toLowerCase();
-        if (!uploaderName.includes(selectedUploader.toLowerCase())) return false;
+        if ((doc.createdBy || doc.creator?.id) !== selectedUploader) return false;
       }
 
       // Search filter
@@ -617,7 +607,7 @@ export default function DocumentsPage() {
               allLabel="Everyone"
               value={selectedUploader}
               onChange={setSelectedUploader}
-              options={UPLOADER_FILTER_OPTIONS}
+              options={uploaderOptions}
             />
           </div>
 
@@ -628,7 +618,7 @@ export default function DocumentsPage() {
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Filter tasks..."
+                placeholder="Filter documents..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs transition-all"
@@ -1140,7 +1130,7 @@ export default function DocumentsPage() {
                       Uploaded By
                     </span>
                     <span className="font-semibold text-slate-800 text-xs">
-                      {selectedDoc.creator?.displayName || "Team Member"}
+                      {selectedDoc.creator?.displayName || selectedDoc.creator?.email || "Unknown user"}
                     </span>
                   </div>
                   <div>

@@ -402,6 +402,8 @@ export const api = {
   },
 
   tasks: {
+    get: async (projectId: string, taskId: string) =>
+      apiRequest<any>(`/projects/${projectId}/tasks/${taskId}`),
     list: async (projectId: string, status?: string) => {
       let url = `/projects/${projectId}/tasks`;
       if (status) url += `?status=${encodeURIComponent(status)}`;
@@ -679,12 +681,12 @@ export const api = {
             body: JSON.stringify({ connectionId, accessToken }),
           }
         ),
-      syncCode: async (projectId: string, connectionId?: string, accessToken?: string) =>
-        apiRequest<{ indexedFilesCount: number; totalFiles: number; lastSyncedAt: string }>(
+      syncCode: async (projectId: string, connectionId?: string, accessToken?: string, progress?: { cursor?: number; treeVersion?: string }) =>
+        apiRequest<{ nextCursor: number | null; treeVersion: string; indexedFilesCount: number; unchangedFilesCount: number; candidateFilesCount: number; totalFiles: number; lastSyncedAt: string }>(
           `/projects/${projectId}/integrations/github/sync-code`,
           {
             method: "POST",
-            body: JSON.stringify({ connectionId, accessToken }),
+            body: JSON.stringify({ connectionId, accessToken, ...progress }),
           }
         ),
       disconnect: async (projectId: string, connectionId?: string) => {
