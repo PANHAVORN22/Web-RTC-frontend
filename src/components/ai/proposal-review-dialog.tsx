@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useToast } from "@/context/toast-context";
@@ -49,6 +49,8 @@ export function ProposalReviewDialog({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmedResults, setConfirmedResults] = useState<any[] | null>(null);
   const [members, setMembers] = useState<any[]>([]);
+  const savedDraft = useRef<{ version: number; json: string } | null>(null);
+  const confirmation = useRef<{ payload: string; key: string } | null>(null);
 
   useEffect(() => {
     if (isOpen && projectId) {
@@ -66,6 +68,9 @@ export function ProposalReviewDialog({
       setDraft(JSON.parse(JSON.stringify(proposal.draftJson)));
       setConfirmedResults(null);
       setErrorMsg(null);
+      setIncludeSummary(proposal.draftJson.type === "MEETING_ANALYSIS");
+      savedDraft.current = { version: proposal.version, json: JSON.stringify(proposal.draftJson) };
+      confirmation.current = null;
 
       // Default select all items
       const ids = new Set<string>();
@@ -133,7 +138,7 @@ export function ProposalReviewDialog({
   };
 
   const handleConfirm = async () => {
-    if (selectedIds.size === 0 && !includeSummary) {
+    if (selectedIds.size === 0 && !(draft.type === "MEETING_ANALYSIS" && includeSummary)) {
       setErrorMsg("Please select at least one item or include summary to confirm.");
       return;
     }
@@ -141,22 +146,28 @@ export function ProposalReviewDialog({
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      let currentVersion = proposal.version;
-      const isDirty = JSON.stringify(draft) !== JSON.stringify(proposal.draftJson);
+      let currentVersion = savedDraft.current?.version ?? proposal.version;
+      const isDirty = JSON.stringify(draft) !== savedDraft.current?.json;
       if (isDirty) {
         const updated = await api.ai.updateProposal(projectId, proposal.id, {
           version: currentVersion,
           draftJson: draft,
         });
         currentVersion = updated.version;
+        savedDraft.current = { version: updated.version, json: JSON.stringify(draft) };
       }
 
       // Confirm with current version
-      const res = await api.ai.confirmProposal(projectId, proposal.id, {
+      const payload = {
         version: currentVersion,
         selectedItemIds: Array.from(selectedIds),
-        includeSummary,
-      });
+        includeSummary: draft.type === "MEETING_ANALYSIS" && includeSummary,
+      };
+      const encoded = JSON.stringify(payload);
+      if (confirmation.current?.payload !== encoded) {
+        confirmation.current = { payload: encoded, key: crypto.randomUUID() };
+      }
+      const res = await api.ai.confirmProposal(projectId, proposal.id, payload, confirmation.current.key);
 
       setConfirmedResults(res.resultRecordIds);
       showToast("AI proposal successfully confirmed! Records created.", "success");
@@ -291,6 +302,15 @@ export function ProposalReviewDialog({
             </div>
           ) : (
             <>
+              {isTaskProposal && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-2">
+                  <p>No tasks are saved until you confirm. Source: {proposal.sourceEntityType.toLowerCase()} revision {proposal.sourceRevision}.</p>
+                  <p className="font-semibold">Supporting document sources</p>
+                  {draft.sourceReferences?.length ? draft.sourceReferences.map((source: { chunkId: string; title: string; revision: number; locator: string }) => (
+                    <p key={source.chunkId}>{source.title} · revision {source.revision} · {source.locator}</p>
+                  )) : <p>No supporting document sources were retrieved for this draft.</p>}
+                </div>
+              )}
               {/* Batch Actions */}
               <div className="flex items-center justify-between text-xs text-slate-500 pb-2.5 border-b border-slate-100">
                 <span>
