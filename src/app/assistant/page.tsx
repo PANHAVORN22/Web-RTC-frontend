@@ -37,11 +37,13 @@ import {
   X,
   ArrowUpRight,
   ArrowLeft,
+  FolderKanban,
 } from "lucide-react";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { MarkdownContent } from "@/components/markdown-content";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { CopilotComposer } from "@/components/ai/copilot-composer";
+import { DropdownSelect } from "@/components/ui/dropdown-select";
 
 const getSourceLink = (sourceType: string, title: string, sourceId?: string) => {
   const cleanTitle = title.replace(/\s*\([^)]*\)$/, "").trim();
@@ -158,7 +160,7 @@ function UserAvatar({ name }: { name?: string }) {
 }
 
 export default function AssistantPage() {
-  const { currentProject, user } = useAuth();
+  const { currentProject, user, projects, setCurrentProject } = useAuth();
   const { showToast } = useToast();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -573,9 +575,38 @@ export default function AssistantPage() {
               <button type="button" onClick={() => setSidebarOpen((open) => !open)} aria-label={sidebarOpen ? "Hide chat history" : "Show chat history"} aria-expanded={sidebarOpen} aria-controls="copilot-history" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-codex-accent"><PanelLeft className="h-4 w-4" /></button>
               <div className="min-w-0"><h1 className="text-sm font-semibold text-slate-900">AI Copilot</h1><p className="mt-0.5 truncate text-[11px] text-slate-400">{activeConv?.title || currentProject?.name || "New conversation"}</p></div>
             </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 xl:flex"><ShieldCheck className="h-3.5 w-3.5" /> {currentProject?.key} sources</span>
-              <button type="button" onClick={handleResetChat} disabled={isSending} aria-label="New conversation" className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"><Plus className="h-4 w-4" /><span className="hidden sm:inline">New chat</span></button>
+            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              {projects.length > 0 && (
+                <DropdownSelect
+                  value={currentProject?.id || ""}
+                  onChange={(val) => {
+                    const p = projects.find((proj) => proj.id === val);
+                    if (p) setCurrentProject(p);
+                  }}
+                  placeholder="Select project..."
+                  triggerClassName="h-8 border-slate-200 text-xs rounded-xl shadow-2xs font-semibold max-w-[130px] sm:max-w-none"
+                  options={projects.map((p) => ({
+                    value: p.id,
+                    label: `[${p.key}] ${p.name}`,
+                    icon: <FolderKanban className="w-3.5 h-3.5 text-codex-accent shrink-0" />,
+                  }))}
+                />
+              )}
+              {currentProject && (
+                <span className="hidden items-center gap-1.5 text-[11px] text-slate-400 xl:flex">
+                  <ShieldCheck className="h-3.5 w-3.5" /> {currentProject.key} sources
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleResetChat}
+                disabled={isSending || !currentProject}
+                aria-label="New conversation"
+                className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">New chat</span>
+              </button>
             </div>
           </header>
 
@@ -600,6 +631,31 @@ export default function AssistantPage() {
                     <div className="h-4 bg-slate-100 rounded-md w-16 animate-pulse" />
                     <div className="h-12 bg-slate-100 rounded-2xl w-1/2 animate-pulse" />
                   </div>
+                </div>
+              </div>
+            ) : !currentProject ? (
+              <div className="mx-auto max-w-md py-12 text-center">
+                <div className="mb-4 mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-codex-accent">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <h2 className="font-serif text-xl font-bold tracking-tight text-slate-900">
+                  Select a Project Workspace
+                </h2>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  AI Copilot grounds its answers on verified project requirements, architecture decisions, and code. Choose a workspace to begin.
+                </p>
+                <div className="mt-6 flex flex-wrap justify-center gap-2">
+                  {projects.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setCurrentProject(p)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:border-codex-accent hover:bg-indigo-50/40 text-xs font-medium text-slate-800 shadow-2xs transition-all cursor-pointer"
+                    >
+                      <FolderKanban className="w-3.5 h-3.5 text-codex-accent shrink-0" />
+                      <span>[{p.key}] {p.name}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : messages.length === 0 && !isSending ? (
