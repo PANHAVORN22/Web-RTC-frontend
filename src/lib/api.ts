@@ -269,7 +269,7 @@ export const api = {
     unarchive: async (id: string) =>
       apiRequest<any>(`/projects/${id}/unarchive`, { method: "POST" }),
     getMembers: async (id: string) => apiRequest<any[]>(`/projects/${id}/members`),
-    addMember: async (id: string, data: { email: string; accessRole: string }) =>
+    addMember: async (id: string, data: { userId?: string; email?: string; accessRole: string }) =>
       apiRequest<any>(`/projects/${id}/members`, { method: "POST", body: JSON.stringify(data) }),
     updateMemberRole: async (id: string, userId: string, data: { accessRole: string }) =>
       apiRequest<any>(`/projects/${id}/members/${userId}`, { method: "PATCH", body: JSON.stringify(data) }),
