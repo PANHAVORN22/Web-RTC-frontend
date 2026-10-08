@@ -255,7 +255,12 @@ export const api = {
   projects: {
     list: async () => apiRequest<any[]>("/projects"),
     get: async (id: string) => apiRequest<any>(`/projects/${id}`),
-    create: async (data: { name: string; key: string; description?: string }) =>
+    create: async (data: {
+      name: string;
+      key: string;
+      description?: string;
+      members?: Array<{ userId: string; role?: string }>;
+    }) =>
       apiRequest<any>("/projects", { method: "POST", body: JSON.stringify(data) }),
     update: async (id: string, data: { name?: string; description?: string }) =>
       apiRequest<any>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
